@@ -36,7 +36,7 @@ def main():
 
     # Test 4: White diagonal line
     print("4. Drawing white diagonal line")
-    for i in range(64):
+    for i in range(min(display.width, display.height)):
         display.set_pixel(i, i, 63, 63, 63)
     time.sleep(2)
 
@@ -53,10 +53,10 @@ def main():
         (0, 0, 0),    # Black
     ]
 
-    bar_width = 64 // len(colors)
+    bar_width = display.width // len(colors)
     for i, color in enumerate(colors):
         for x in range(i * bar_width, (i + 1) * bar_width):
-            for y in range(64):
+            for y in range(display.height):
                 display.set_pixel(x, y, *color)
 
     print("Test complete! If you saw the patterns, your connection is working.")

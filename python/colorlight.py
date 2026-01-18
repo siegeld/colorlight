@@ -22,7 +22,7 @@ class ColorlightDisplay:
         self,
         ip: str = "192.168.178.50",
         base_port: int = 6000,
-        width: int = 64,
+        width: int = 128,
         height: int = 64
     ):
         """
@@ -127,7 +127,7 @@ class ColorlightFrameBuffer:
         self,
         ip: str = "192.168.178.50",
         port: int = 6000,
-        width: int = 64,
+        width: int = 128,
         height: int = 64
     ):
         """
@@ -136,8 +136,8 @@ class ColorlightFrameBuffer:
         Args:
             ip: IP address of the Colorlight board
             port: UDP port for this panel
-            width: Panel width in pixels
-            height: Panel height in pixels
+            width: Panel width in pixels (default 128)
+            height: Panel height in pixels (default 64)
         """
         if not HAS_NUMPY:
             raise ImportError("NumPy is required for ColorlightFrameBuffer")

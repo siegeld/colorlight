@@ -44,13 +44,14 @@ def hsv_to_rgb(h: float, s: float, v: float) -> tuple:
 
 def plasma(display: ColorlightDisplay, t: float) -> None:
     """Generate one frame of plasma effect."""
+    cx, cy = display.width // 2, display.height // 2
     for y in range(display.height):
         for x in range(display.width):
             # Combine multiple sine waves for plasma effect
             v1 = math.sin(x * 0.1 + t)
             v2 = math.sin((y * 0.1 + t) * 0.5)
             v3 = math.sin((x * 0.1 + y * 0.1 + t) * 0.5)
-            v4 = math.sin(math.sqrt((x - 32) ** 2 + (y - 32) ** 2) * 0.15 + t)
+            v4 = math.sin(math.sqrt((x - cx) ** 2 + (y - cy) ** 2) * 0.15 + t)
 
             # Combine and normalize to 0-1
             v = (v1 + v2 + v3 + v4 + 4) / 8
