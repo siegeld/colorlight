@@ -42,13 +42,31 @@ python python/examples/test_connection.py
 
 ### Host System (your PC)
 
-| Tool | Purpose | Install |
-|------|---------|---------|
-| Docker | Runs FPGA build tools | `sudo dnf install docker` |
-| openFPGALoader | Flashes bitstreams to FPGA | `sudo dnf install openFPGALoader` |
-| Python 3 | Runs display control scripts | Usually pre-installed |
+| Tool | Purpose |
+|------|---------|
+| Docker | Runs FPGA build tools |
+| openFPGALoader | Flashes bitstreams to FPGA |
+| Python 3 | Runs display control scripts |
 
 The FPGA toolchain (yosys, nextpnr, prjtrellis) runs inside Docker - no need to install these on your system.
+
+#### Installing on Fedora
+
+```bash
+# Docker
+sudo dnf install docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER  # then logout/login
+
+# openFPGALoader (build from source - not in Fedora repos)
+sudo dnf install cmake libftdi-devel libusb1-devel hidapi-devel libudev-devel
+git clone https://github.com/trabucayre/openFPGALoader /tmp/openFPGALoader
+cd /tmp/openFPGALoader
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+```
 
 ### Hardware
 

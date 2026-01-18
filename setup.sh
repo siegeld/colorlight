@@ -44,7 +44,7 @@ echo "Checking openFPGALoader..."
 if command -v openFPGALoader &> /dev/null; then
     echo "  [OK] openFPGALoader is installed"
 else
-    echo "  [!!] openFPGALoader not found (needed for flashing)"
+    echo "  [!!] openFPGALoader not found - will build from source"
     NEED_FPGALOADER=true
 fi
 
@@ -69,27 +69,56 @@ fi
 echo ""
 
 # Show what needs to be installed
-if [ "$NEED_DOCKER" = true ] || [ "$NEED_FPGALOADER" = true ]; then
+if [ "$NEED_DOCKER" = true ]; then
     echo "========================================"
-    echo "Missing Dependencies"
+    echo "Missing: Docker"
+    echo "========================================"
+    echo ""
+    echo "Install Docker first:"
+    echo "  sudo dnf install docker"
+    echo "  sudo systemctl enable --now docker"
+    echo "  sudo usermod -aG docker $USER"
+    echo "  # Then logout and login again"
+    echo ""
+    echo "Re-run this script after installing Docker."
+    exit 1
+fi
+
+# Build openFPGALoader from source if needed
+if [ "$NEED_FPGALOADER" = true ]; then
+    echo "========================================"
+    echo "Building openFPGALoader from source..."
     echo "========================================"
     echo ""
 
-    if [ "$NEED_DOCKER" = true ]; then
-        echo "Install Docker:"
-        echo "  Fedora: sudo dnf install docker docker-compose"
-        echo "          sudo systemctl enable --now docker"
-        echo "          sudo usermod -aG docker $USER"
-        echo ""
+    # Install build dependencies (Fedora)
+    if command -v dnf &> /dev/null; then
+        echo "Installing build dependencies..."
+        sudo dnf install -y cmake libftdi-devel libusb1-devel hidapi-devel libudev-devel gcc-c++ git
+    elif command -v apt &> /dev/null; then
+        sudo apt install -y cmake libftdi1-dev libusb-1.0-0-dev libhidapi-dev libudev-dev g++ git
     fi
 
-    if [ "$NEED_FPGALOADER" = true ]; then
-        echo "Install openFPGALoader:"
-        echo "  Fedora: sudo dnf install openFPGALoader"
-        echo "  Ubuntu: sudo apt install openfpgaloader"
-        echo "  Arch:   sudo pacman -S openfpgaloader"
-        echo ""
+    # Clone and build
+    FPGALOADER_DIR="/tmp/openFPGALoader-$$"
+    git clone --depth 1 https://github.com/trabucayre/openFPGALoader "$FPGALOADER_DIR"
+    cd "$FPGALOADER_DIR"
+    mkdir build && cd build
+    cmake ..
+    make -j$(nproc)
+    sudo make install
+
+    # Copy udev rules
+    if [ -f "$FPGALOADER_DIR/99-openfpgaloader.rules" ]; then
+        sudo cp "$FPGALOADER_DIR/99-openfpgaloader.rules" /etc/udev/rules.d/
     fi
+
+    # Cleanup
+    rm -rf "$FPGALOADER_DIR"
+    cd "$SCRIPT_DIR"
+
+    echo "  [OK] openFPGALoader installed"
+    echo ""
 fi
 
 # Setup udev rules
