@@ -2,17 +2,6 @@
 
 Drive HUB75 LED matrix panels from Python using a Colorlight 5A-75E V8.2 FPGA board.
 
-## Cloning
-
-This repo uses git submodules. Clone with:
-
-```bash
-git clone --recursive <repo-url>
-
-# Or if already cloned:
-git submodule update --init --recursive
-```
-
 ## Overview
 
 ```
