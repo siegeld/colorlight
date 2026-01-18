@@ -145,14 +145,17 @@ echo "========================================"
 echo "Setting up Python environment..."
 echo "========================================"
 
-if [ ! -d "$SCRIPT_DIR/venv" ]; then
+if [ ! -d "$SCRIPT_DIR/venv" ] || [ ! -f "$SCRIPT_DIR/venv/bin/pip" ]; then
     echo "Creating virtual environment..."
+    rm -rf "$SCRIPT_DIR/venv"
     python3 -m venv "$SCRIPT_DIR/venv"
+    # Ensure pip is installed (some systems have broken venv)
+    "$SCRIPT_DIR/venv/bin/python" -m ensurepip --upgrade 2>/dev/null || true
 fi
 
 echo "Installing Python dependencies..."
 source "$SCRIPT_DIR/venv/bin/activate"
-pip install --quiet --upgrade pip
+python -m pip install --quiet --upgrade pip
 pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
 echo "  [OK] Python environment ready"
 echo ""
