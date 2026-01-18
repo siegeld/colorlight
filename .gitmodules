@@ -1,0 +1,6 @@
+[submodule "docs/chubby75"]
+	path = docs/chubby75
+	url = https://github.com/q3k/chubby75.git
+[submodule "firmware/colorlight-led-cube"]
+	path = firmware/colorlight-led-cube
+	url = https://github.com/lucysrausch/colorlight-led-cube.git

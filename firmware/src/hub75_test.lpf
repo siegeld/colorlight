@@ -1,0 +1,49 @@
+# Colorlight 5A-75E V6.0/V8.0/V8.2 - HUB75 test pattern constraints
+# Uses J1 connector for a single panel test
+# Reference: https://github.com/q3k/chubby75/blob/master/5a-75e/hardware_V6.0.md
+
+# Clock from PHY
+LOCATE COMP "osc25m" SITE "P6";
+IOBUF PORT "osc25m" IO_TYPE=LVCMOS33;
+
+# Onboard LED (active low)
+LOCATE COMP "led" SITE "T6";
+IOBUF PORT "led" IO_TYPE=LVCMOS33;
+
+# PHY reset
+LOCATE COMP "phy_resetn" SITE "R6";
+IOBUF PORT "phy_resetn" IO_TYPE=LVCMOS33;
+
+# HUB75 Shared Control Signals
+LOCATE COMP "panel_a"   SITE "N5";
+LOCATE COMP "panel_b"   SITE "N3";
+LOCATE COMP "panel_c"   SITE "P3";
+LOCATE COMP "panel_d"   SITE "P4";
+LOCATE COMP "panel_e"   SITE "N4";
+LOCATE COMP "panel_clk" SITE "M3";
+LOCATE COMP "panel_lat" SITE "N1";
+LOCATE COMP "panel_oe"  SITE "M4";
+
+IOBUF PORT "panel_a"   IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_b"   IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_c"   IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_d"   IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_e"   IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_clk" IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_lat" IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_oe"  IO_TYPE=LVCMOS33;
+
+# J1 RGB Data
+LOCATE COMP "panel_r0" SITE "C4";
+LOCATE COMP "panel_g0" SITE "D4";
+LOCATE COMP "panel_b0" SITE "E4";
+LOCATE COMP "panel_r1" SITE "D3";
+LOCATE COMP "panel_g1" SITE "E3";
+LOCATE COMP "panel_b1" SITE "F4";
+
+IOBUF PORT "panel_r0" IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_g0" IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_b0" IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_r1" IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_g1" IO_TYPE=LVCMOS33;
+IOBUF PORT "panel_b1" IO_TYPE=LVCMOS33;

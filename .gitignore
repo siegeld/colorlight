@@ -1,0 +1,38 @@
+# Build outputs
+firmware/build/
+*.bit
+*.svf
+*.json
+*.config
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+
+# Keep .gitkeep files
+!.gitkeep
