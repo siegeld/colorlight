@@ -8,4 +8,5 @@ pub mod img;
 pub mod img_flash;
 pub mod menu;
 pub mod panic;
+pub mod patterns;
 pub mod pearson_hash;

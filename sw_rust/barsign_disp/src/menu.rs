@@ -180,6 +180,19 @@ pub const ROOT_MENU: Menu<Context> = Menu {
             command: "set_default_panel_params",
             help: Some("Sets the default panel parameters"),
         },
+        &Item {
+            item_type: ItemType::Callback {
+                function: pattern,
+                parameters: &[
+                    Parameter::Mandatory {
+                        parameter_name: "name",
+                        help: Some("grid, rainbow, white, red, green, blue"),
+                    },
+                ],
+            },
+            command: "pattern",
+            help: Some("Display a test pattern"),
+        },
     ],
     entry: None,
     exit: None,
@@ -368,6 +381,64 @@ fn set_default_panel_params(
 ) {
     // Single 128x64 panel: one chain position at x=0, y=0
     context.hub75.set_panel_param(0, 0, 0, 0, 0);
+}
+
+fn pattern(
+    _menu: &Menu<Context>,
+    item: &Item<Context>,
+    args: &[&str],
+    context: &mut Context,
+) {
+    use crate::patterns;
+    let name: &str = argument_finder(item, args, "name").unwrap().unwrap();
+    let hub75 = &mut context.hub75;
+    let (width, length) = hub75.get_img_param();
+    let height = if width > 0 { length / (width as u32) } else { 0 };
+
+    if width == 0 || height == 0 {
+        writeln!(context.output, "Image params not set. Use set_image_param first.").unwrap();
+        return;
+    }
+
+    let w = width;
+    let h = height as u16;
+    let total = length;
+
+    match name {
+        "grid" => {
+            hub75.set_img_param(w, total);
+            hub75.write_img_data(0, patterns::grid(w, h));
+        }
+        "rainbow" => {
+            hub75.set_img_param(w, total);
+            hub75.write_img_data(0, patterns::rainbow(w, h));
+        }
+        "white" => {
+            hub75.set_img_param(w, total);
+            hub75.write_img_data(0, patterns::solid_white(w, h));
+        }
+        "red" => {
+            hub75.set_img_param(w, total);
+            hub75.write_img_data(0, patterns::solid_red(w, h));
+        }
+        "green" => {
+            hub75.set_img_param(w, total);
+            hub75.write_img_data(0, patterns::solid_green(w, h));
+        }
+        "blue" => {
+            hub75.set_img_param(w, total);
+            hub75.write_img_data(0, patterns::solid_blue(w, h));
+        }
+        _ => {
+            writeln!(context.output, "Unknown pattern: {}", name).unwrap();
+            writeln!(context.output, "Available: grid, rainbow, white, red, green, blue").unwrap();
+            return;
+        }
+    }
+
+    hub75.set_mode(OutputMode::FullColor);
+    hub75.on();
+    writeln!(context.output, "Pattern '{}' loaded ({}x{})", name, w, h).unwrap();
 }
 
 // fn set_mac_ip(_menu: &Menu<Context>, item: &Item<Context>, args: &[&str], context: &mut Context) {
