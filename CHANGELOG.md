@@ -14,6 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-01-25
+
+### Added
+- **General-purpose panel configuration** - Support for multiple panel types via `--panel` argument
+  - 96x48 (default), 128x64, 64x32, 64x64 panels supported
+  - Configurable scan rates (1/16, 1/24, 1/32)
+- **build.sh enhancements**
+  - `--panel` argument to select panel type at build time
+  - Automatic test image generation with correct panel dimensions
+- **gen_test_image.py** - New script to generate panel-specific test patterns
+  - Horizontal lines at key rows (top, middle, bottom)
+  - Vertical lines at evenly spaced columns (colored: RED, GREEN, BLUE, YELLOW, MAGENTA)
+  - Diagonal X pattern (CYAN and MAGENTA) for visual alignment verification
+
+### Changed
+- hub75.py now accepts `columns`, `rows`, `scan` parameters instead of hardcoded values
+- colorlight.py uses PANELS configuration dictionary for panel definitions
+- Row addressing properly wraps using Migen conditional logic instead of Python modulo
+
+### Fixed
+- Row wrap-around calculation using proper Migen signal expressions
+
+---
+
 ## [0.1.0] - 2025-01-25
 
 ### Added
@@ -49,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.0 | 2026-01-25 | General-purpose panel configuration |
 | 0.1.0 | 2025-01-25 | Initial release with telnet support |
 
 ---

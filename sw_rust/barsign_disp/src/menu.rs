@@ -366,10 +366,8 @@ fn set_default_panel_params(
     _args: &[&str],
     context: &mut Context,
 ) {
+    // Single 128x64 panel: one chain position at x=0, y=0
     context.hub75.set_panel_param(0, 0, 0, 0, 0);
-    context.hub75.set_panel_param(0, 1, 0, 1, 0);
-    context.hub75.set_panel_param(0, 2, 2, 0, 0);
-    context.hub75.set_panel_param(0, 3, 2, 1, 0);
 }
 
 // fn set_mac_ip(_menu: &Menu<Context>, item: &Item<Context>, args: &[&str], context: &mut Context) {

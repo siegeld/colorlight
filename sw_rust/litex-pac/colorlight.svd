@@ -3,7 +3,7 @@
 <device schemaVersion="1.1" xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:noNamespaceSchemaLocation="CMSIS-SVD.xsd" >
     <vendor>litex</vendor>
     <name>SOC</name>
-    <description><![CDATA[Litex SoC 2026-01-25 16:05:18]]></description>
+    <description><![CDATA[Litex SoC 2026-01-25 21:25:22]]></description>
 
     <addressUnitBits>8</addressUnitBits>
     <width>32</width>
@@ -676,7 +676,7 @@ register to disable individual events.]]></description>
                     </fields>
                 </register>
                 <register>
-                    <name>PANEL0_1</name>
+                    <name>PANEL1_0</name>
                     <addressOffset>0x0008</addressOffset>
                     <resetValue>0x00</resetValue>
                     <size>32</size>
@@ -705,7 +705,7 @@ register to disable individual events.]]></description>
                     </fields>
                 </register>
                 <register>
-                    <name>PANEL0_2</name>
+                    <name>PANEL2_0</name>
                     <addressOffset>0x000c</addressOffset>
                     <resetValue>0x00</resetValue>
                     <size>32</size>
@@ -734,7 +734,7 @@ register to disable individual events.]]></description>
                     </fields>
                 </register>
                 <register>
-                    <name>PANEL0_3</name>
+                    <name>PANEL3_0</name>
                     <addressOffset>0x0010</addressOffset>
                     <resetValue>0x00</resetValue>
                     <size>32</size>
@@ -763,7 +763,7 @@ register to disable individual events.]]></description>
                     </fields>
                 </register>
                 <register>
-                    <name>PANEL1_0</name>
+                    <name>PANEL4_0</name>
                     <addressOffset>0x0014</addressOffset>
                     <resetValue>0x00</resetValue>
                     <size>32</size>
@@ -792,7 +792,7 @@ register to disable individual events.]]></description>
                     </fields>
                 </register>
                 <register>
-                    <name>PANEL1_1</name>
+                    <name>PANEL5_0</name>
                     <addressOffset>0x0018</addressOffset>
                     <resetValue>0x00</resetValue>
                     <size>32</size>
@@ -821,7 +821,7 @@ register to disable individual events.]]></description>
                     </fields>
                 </register>
                 <register>
-                    <name>PANEL1_2</name>
+                    <name>PANEL6_0</name>
                     <addressOffset>0x001c</addressOffset>
                     <resetValue>0x00</resetValue>
                     <size>32</size>
@@ -850,704 +850,8 @@ register to disable individual events.]]></description>
                     </fields>
                 </register>
                 <register>
-                    <name>PANEL1_3</name>
-                    <addressOffset>0x0020</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL2_0</name>
-                    <addressOffset>0x0024</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL2_1</name>
-                    <addressOffset>0x0028</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL2_2</name>
-                    <addressOffset>0x002c</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL2_3</name>
-                    <addressOffset>0x0030</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL3_0</name>
-                    <addressOffset>0x0034</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL3_1</name>
-                    <addressOffset>0x0038</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL3_2</name>
-                    <addressOffset>0x003c</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL3_3</name>
-                    <addressOffset>0x0040</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL4_0</name>
-                    <addressOffset>0x0044</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL4_1</name>
-                    <addressOffset>0x0048</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL4_2</name>
-                    <addressOffset>0x004c</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL4_3</name>
-                    <addressOffset>0x0050</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL5_0</name>
-                    <addressOffset>0x0054</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL5_1</name>
-                    <addressOffset>0x0058</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL5_2</name>
-                    <addressOffset>0x005c</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL5_3</name>
-                    <addressOffset>0x0060</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL6_0</name>
-                    <addressOffset>0x0064</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL6_1</name>
-                    <addressOffset>0x0068</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL6_2</name>
-                    <addressOffset>0x006c</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL6_3</name>
-                    <addressOffset>0x0070</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
                     <name>PANEL7_0</name>
-                    <addressOffset>0x0074</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL7_1</name>
-                    <addressOffset>0x0078</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL7_2</name>
-                    <addressOffset>0x007c</addressOffset>
-                    <resetValue>0x00</resetValue>
-                    <size>32</size>
-                    <fields>
-                        <field>
-                            <name>x</name>
-                            <msb>7</msb>
-                            <bitRange>[7:0]</bitRange>
-                            <lsb>0</lsb>
-                            <description><![CDATA[x position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>y</name>
-                            <msb>15</msb>
-                            <bitRange>[15:8]</bitRange>
-                            <lsb>8</lsb>
-                            <description><![CDATA[y position in multiples of 32]]></description>
-                        </field>
-                        <field>
-                            <name>rot</name>
-                            <msb>17</msb>
-                            <bitRange>[17:16]</bitRange>
-                            <lsb>16</lsb>
-                            <description><![CDATA[rotation in clockwise 90°]]></description>
-                        </field>
-                    </fields>
-                </register>
-                <register>
-                    <name>PANEL7_3</name>
-                    <addressOffset>0x0080</addressOffset>
+                    <addressOffset>0x0020</addressOffset>
                     <resetValue>0x00</resetValue>
                     <size>32</size>
                     <fields>
@@ -1577,7 +881,7 @@ register to disable individual events.]]></description>
             </registers>
             <addressBlock>
                 <offset>0</offset>
-                <size>0x84</size>
+                <size>0x24</size>
                 <usage>registers</usage>
             </addressBlock>
         </peripheral>
@@ -2250,7 +1554,7 @@ register to disable individual events.]]></description>
             <constant name="CONFIG_CPU_NAME" value="vexriscv" />
             <constant name="CONFIG_CPU_HUMAN_NAME" value="VexRiscv_Min" />
             <constant name="CONFIG_CPU_NOP" value="nop" />
-            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-01-25 16:03:41" />
+            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-01-25 21:24:13" />
             <constant name="FLASH_BOOT_ADDRESS" value="2150629376" />
             <constant name="SPIFLASH_PAGE_SIZE" value="256" />
             <constant name="CONFIG_L2_SIZE" value="8192" />

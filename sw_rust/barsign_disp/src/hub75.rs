@@ -1,6 +1,6 @@
 use litex_pac as pac;
 
-const CHAIN_LENGTH: u8 = 4;
+const CHAIN_LENGTH: u8 = 1;  // Matches chain_length_2=0 in gateware (single 128x64 panel)
 const OUTPUTS: u8 = 8;
 
 pub struct Hub75 {
@@ -136,4 +136,5 @@ impl Hub75 {
         let palette_data: &[u32] = unsafe { core::slice::from_raw_parts(palette_adr, LENGTH) };
         palette_data
     }
+
 }

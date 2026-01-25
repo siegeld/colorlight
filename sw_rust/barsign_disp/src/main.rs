@@ -54,7 +54,7 @@ fn main() -> ! {
 
     let mut buffer = [0u8; 64];
     let out_data = heapless::Vec::new();
-    let output = menu::Output { serial, out_data };
+    let mut output = menu::Output { serial, out_data };
 
     // Standard LiteEth doesn't need hardware MAC/IP configuration
     // All packet handling is done in software via smoltcp
@@ -98,11 +98,22 @@ fn main() -> ! {
     // Always turn on HUB75 for debugging (shows firmware is running)
     hub75.on();
 
+    // Load image from SPI flash if available, otherwise use default
     if let Ok(image) = img::load_image(flash.read_image()) {
         hub75.set_img_param(image.0, image.1);
-        hub75.set_panel_params(image.2);
+        hub75.write_img_data(0, image.3);
+    } else {
+        let image = img::load_default_image();
+        hub75.set_img_param(image.0, image.1);
         hub75.write_img_data(0, image.3);
     }
+
+    // Configure panel: single 128x64 panel, one chain position
+    hub75.set_panel_param(0, 0, 0, 0, 0);  // x=0, y=0, no rotation
+
+    // Debug: print panel params to verify they were set
+    let (x0, y0, r0) = hub75.get_panel_param(0, 0);
+    writeln!(output.serial, "Panel config set: p0_0=({},{},{})", x0, y0, r0).ok();
 
     let context = menu::Context {
         ip_mac,

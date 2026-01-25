@@ -59,6 +59,14 @@ import hub75
 
 import helper
 
+# Panel configurations: columns, rows, scan rate (rows per address cycle)
+PANELS = {
+    "128x64": {"columns": 128, "rows": 64, "scan": 32},
+    "96x48":  {"columns": 96,  "rows": 48, "scan": 24},
+    "64x32":  {"columns": 64,  "rows": 32, "scan": 16},
+    "64x64":  {"columns": 64,  "rows": 64, "scan": 32},
+}
+
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -126,6 +134,7 @@ class BaseSoC(SoCCore):
         sdram_rate="1:1",
         no_ident_version=False,
         ip_address="10.11.6.250",
+        panel="96x48",
         **kwargs
     ):
         platform = colorlight_5a_75e.Platform(revision=revision)
@@ -227,7 +236,14 @@ class BaseSoC(SoCCore):
         pins_common = platform.request("hub75_common")
         pins = [platform.request("hub75_data", i) for i in range(8)]
 
-        self.submodules.hub75 = hub75.Hub75(pins_common, pins, self.sdram)
+        # Get panel configuration
+        panel_cfg = PANELS[panel]
+        self.submodules.hub75 = hub75.Hub75(
+            pins_common, pins, self.sdram,
+            columns=panel_cfg["columns"],
+            rows=panel_cfg["rows"],
+            scan=panel_cfg["scan"]
+        )
 
         # Ethernet / Etherbone ---------------------------------------------------------------------
         # Use phy0
@@ -303,12 +319,19 @@ def main():
         default=40e6,
         help="System clock frequency (default: 40MHz)",
     )
+    parser.add_argument(
+        "--panel",
+        default="96x48",
+        choices=list(PANELS.keys()),
+        help=f"Panel type (default: 96x48). Available: {', '.join(PANELS.keys())}",
+    )
     args = parser.parse_args()
 
     soc = BaseSoC(
         revision=args.revision,
         sys_clk_freq=args.sys_clk_freq,
         ip_address=args.ip_address,
+        panel=args.panel,
         **soc_core_argdict(args)
     )
     builder_options = builder_argdict(args)

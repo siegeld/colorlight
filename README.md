@@ -22,7 +22,7 @@ A complete FPGA-based LED panel controller for **HUB75** displays, built on the 
 |-----------|---------------|
 | FPGA Board | Colorlight 5A-75E V8.2 (Lattice ECP5-25F) |
 | Programmer | USB Blaster, FTDI FT2232, or compatible JTAG |
-| LED Panels | HUB75/HUB75E compatible (tested with 128x64) |
+| LED Panels | HUB75/HUB75E compatible (96x48, 128x64, 64x32, 64x64) |
 | Network | 100Mbps Ethernet |
 
 ## Quick Start
@@ -33,13 +33,48 @@ A complete FPGA-based LED panel controller for **HUB75** displays, built on the 
 - USB Blaster or compatible JTAG programmer
 - Network connection to the board
 
-### 1. Build Docker Environment
+### Using the Build Script (Recommended)
+
+The `build.sh` script simplifies the entire workflow:
+
+```bash
+# Build everything (Docker image, bitstream, firmware)
+./build.sh
+
+# Build for a specific panel type
+./build.sh --panel 128x64 bitstream firmware
+
+# Or step by step
+./build.sh docker      # Build Docker environment
+./build.sh bitstream   # Build FPGA bitstream
+./build.sh firmware    # Build Rust firmware
+./build.sh boot        # Program SRAM + boot via TFTP
+./build.sh flash       # Program to SPI flash (persistent)
+
+# Show all options
+./build.sh --help
+```
+
+### Supported Panels
+
+| Panel | Scan Rate | Notes |
+|-------|-----------|-------|
+| 96x48 | 1/24 | Default configuration |
+| 128x64 | 1/32 | Large format |
+| 64x32 | 1/16 | Compact |
+| 64x64 | 1/32 | Square format |
+
+### Manual Build Steps
+
+If you prefer manual control:
+
+#### 1. Build Docker Environment
 
 ```bash
 docker build -t litex-hub75 .
 ```
 
-### 2. Build Bitstream & Firmware
+#### 2. Build Bitstream & Firmware
 
 ```bash
 # Build FPGA bitstream
@@ -51,7 +86,7 @@ docker run --rm -v "$(pwd):/project" litex-hub75 \
     "cd /project/sw_rust/barsign_disp && cargo build --release"
 ```
 
-### 3. Program the FPGA
+#### 3. Program the FPGA
 
 ```bash
 # Flash bitstream to SPI (persistent)
@@ -65,7 +100,7 @@ docker run --rm -v "$(pwd):/project" -v /dev/bus/usb:/dev/bus/usb --privileged \
     /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
 ```
 
-### 4. Test Connection
+### Test Connection
 
 ```bash
 # Test ping
@@ -79,8 +114,10 @@ telnet 10.11.6.250 23
 
 ```
 colorlight/
+├── build.sh               # Build script (run ./build.sh --help)
 ├── colorlight.py          # LiteX SoC definition
 ├── hub75.py               # HUB75 display driver (gateware)
+├── gen_test_image.py      # Test pattern generator
 ├── smoleth.py             # Ethernet module
 ├── Dockerfile             # Build environment
 ├── sw_rust/               # Rust firmware

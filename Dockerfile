@@ -55,11 +55,12 @@ RUN wget -q https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_s
 # Install Rust for firmware
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
     . /root/.cargo/env && \
-    rustup target add riscv32i-unknown-none-elf
+    rustup target add riscv32i-unknown-none-elf && \
+    cargo install svd2rust form
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /project
 
-ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["bash"]
+# No ENTRYPOINT - use bash -c in build script for flexibility
+CMD ["/bin/bash"]

@@ -11,14 +11,28 @@ sdram_offset = 0x00400000//2//4
 
 
 class Hub75(Module, AutoCSR):
-    def __init__(self, pins_common, pins, sdram):
+    def __init__(self, pins_common, pins, sdram, columns=96, rows=48, scan=24, chain_length_2=0):
+        """
+        HUB75 LED Panel Controller.
+
+        Args:
+            pins_common: Common HUB75 pins (active accent, accent, row select, etc.)
+            pins: Per-output RGB data pins
+            sdram: SDRAM controller for framebuffer access
+            columns: Number of columns (e.g., 96, 128). Default 96.
+            rows: Number of rows (e.g., 48, 64). Default 48.
+            scan: Scan rate - number of row addresses (e.g., 24 for 1/24 scan). Default 24.
+            chain_length_2: log2 of chain positions (0=1, 1=2, 2=4). Default 0 for single panel.
+        """
+        # Calculate derived values
+        rows_per_half = rows // 2
+        row_bits = (scan - 1).bit_length()  # Number of address bits needed
         # Registers
         self.ctrl = CSRStorage(fields=[
             CSRField("indexed", description="Display an indexed image"),
             CSRField("enabled", description="Enable the output"),
             CSRField("width", description="Width of the image", size=16),
         ])
-        chain_length_2 = 2
         panel_config = Array()
         for panel_output in range(8):
             for chain_pos in range(1 << chain_length_2):
@@ -43,9 +57,12 @@ class Hub75(Module, AutoCSR):
             pins_common,
             self.ctrl.fields.enabled,
             brightness_psc=16,
+            scan=scan,
+            row_bits=row_bits,
         )
         self.submodules.specific = RowController(
             self.common, pins, output_config, panel_config, read_port,
+            columns=columns, rows_per_half=rows_per_half, scan=scan,
             chain_length_2=chain_length_2
         )
         self.palette_memory = self.specific.palette_memory
@@ -64,7 +81,8 @@ def _get_gamma_corr(bits_in=8, bits_out=8):
 
 class FrameController(Module):
     def __init__(
-            self, outputs_common, enable: Signal(1), brightness_psc=1,  brightness_bits=8
+            self, outputs_common, enable: Signal(1), brightness_psc=1, brightness_bits=8,
+            scan=24, row_bits=5
     ):
         self.start_shifting = start_shifting = Signal(1)
         self.shifting_done = shifting_done = Signal(1)
@@ -75,8 +93,9 @@ class FrameController(Module):
         self.output_bit = brightness_bit = Signal(max=brightness_bits)
         brightness_counter = Signal(
             max=(1 << brightness_bits) * brightness_psc)
-        row_active = Signal(4)
-        self.row_select = row_shifting = Signal(4)
+        row_active = Signal(row_bits)  # Address bits for scan rate
+        self.row_select = row_shifting = Signal(row_bits)
+        self.scan = scan  # Store for row counter limit
         self.submodules.fsm = fsm = FSM(reset_state="RST")
         fsm.act("RST",
                 start_shifting.eq(1),
@@ -96,7 +115,12 @@ class FrameController(Module):
                         NextValue(row_active, row_shifting),
                         NextValue(brightness_bit, brightness_bit - 1),)
                     .Else(
-                        NextValue(row_shifting, row_shifting + 1),
+                        # Wrap row counter at scan rate (e.g., 24 for 1/24 scan)
+                        If(row_shifting >= (scan - 1),
+                            NextValue(row_shifting, 0),
+                        ).Else(
+                            NextValue(row_shifting, row_shifting + 1),
+                        ),
                         NextValue(brightness_bit, brightness_bits - 1),
                     ),
                     NextValue(counter, counter_max - 1),
@@ -118,10 +142,14 @@ class FrameController(Module):
 
 class RowController(Module):
     def __init__(self, hub75_common, outputs_specific, output_config,
-                 panel_config, read_port, collumns_2=6, chain_length_2=0):
+                 panel_config, read_port, columns=96, rows_per_half=24, scan=24,
+                 chain_length_2=0):
         self.specials.palette_memory = palette_memory = Memory(
             width=32, depth=256, name="palette"
         )
+
+        # Calculate buffer size: columns * 2 (top + bottom halves) * chain_length
+        buffer_depth = columns * 2 * (1 << chain_length_2)
 
         row_buffers = Array()
         row_readers = Array()
@@ -134,7 +162,7 @@ class RowController(Module):
             # A quarter is not needed and (somewhat) easily used
             for _ in range(8):
                 row_buffer = Memory(
-                    width=32, depth=1 << (collumns_2 + chain_length_2 + 1),
+                    width=32, depth=buffer_depth,
                 )
                 row_writer = row_buffer.get_port(write_capable=True)
                 row_reader = row_buffer.get_port()
@@ -149,13 +177,23 @@ class RowController(Module):
         shifting_buffer = Signal()
         mem_start = Signal()
         row_start = Signal()
+        # Row mask based on scan rate (e.g., 0x17 for scan=24, 0x1F for scan=32)
+        row_mask = scan - 1
+        # Compute next row with wrap-around (can't use Python % on Migen signals)
+        row_bits = (scan - 1).bit_length()
+        next_row = Signal(row_bits)
+        self.comb += If(hub75_common.row_select >= (scan - 1),
+            next_row.eq(0)
+        ).Else(
+            next_row.eq(hub75_common.row_select + 1)
+        )
         self.submodules.buffer_reader = RamToBufferReader(
-            mem_start, (hub75_common.row_select + 1) & 0xF,
+            mem_start, next_row,
             output_config.indexed, output_config.width, panel_config,
             read_port, row_writers[~shifting_buffer], palette_memory,
-            collumns_2, chain_length_2)
+            columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2)
         self.submodules.row_module = RowModule(
-            row_start, hub75_common.clk, collumns_2, chain_length_2
+            row_start, hub75_common.clk, columns=columns, chain_length_2=chain_length_2
         )
 
         self.submodules.output = Output(outputs_specific,
@@ -192,14 +230,15 @@ class RamToBufferReader(Module):
     def __init__(
             self,
             start: Signal(1),
-            row: Signal(4),
+            row,  # Row address signal
             use_palette: Signal(1),
             image_width: Signal(16),
             panel_config,
             mem_read_port,
             buffer_write_port,
             palette_memory,
-            collumns_2,
+            columns=96,
+            rows_per_half=24,
             chain_length_2=0,
     ):
         self.done = Signal()
@@ -214,7 +253,7 @@ class RamToBufferReader(Module):
         self.submodules.reader = LiteDRAMDMAReader(mem_read_port, 16)
         self.submodules.ram_adr = RamAddressGenerator(
             start, self.reader.sink.ready & ~self.prevent_read, row, image_width, panel_config,
-            collumns_2, chain_length_2)
+            columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2)
 
         # Generate rsv_level which was removed
         rsv_level = Signal(max=16 + 1)
@@ -281,10 +320,12 @@ class RamToBufferReader(Module):
         ]
 
         # Buffer Writer
+        # Calculate bits needed for column addressing
+        columns_bits = (columns - 1).bit_length()  # e.g., 7 for 96 columns (fits in 7 bits)
         buffer_done = Signal()
-        buffer_counter = Signal(collumns_2 + 1 + chain_length_2 + 3)
+        buffer_counter = Signal(columns_bits + 1 + chain_length_2 + 3)
         buffer_select = Signal(3)
-        buffer_address = Signal(collumns_2 + 1 + chain_length_2)
+        buffer_address = Signal(columns_bits + 1 + chain_length_2)
 
         for i in range(8):
             self.sync += [
@@ -293,13 +334,22 @@ class RamToBufferReader(Module):
                     buffer_write_port[i].adr.eq(buffer_address),
                    )
             ]
+        # Build buffer_address: handle chain_length_2=0 (no chain select bits)
+        if chain_length_2 > 0:
+            buffer_addr_cat = Cat(
+                buffer_counter[columns_bits],
+                buffer_counter[:columns_bits],
+                buffer_counter[columns_bits + 1:columns_bits + 1 + chain_length_2]
+            )
+        else:
+            buffer_addr_cat = Cat(
+                buffer_counter[columns_bits],
+                buffer_counter[:columns_bits]
+            )
         self.comb += [
-            buffer_select.eq(buffer_counter[collumns_2 + 1 + chain_length_2:]),
-            buffer_address.eq(
-                Cat(buffer_counter[collumns_2],
-                    buffer_counter[:collumns_2],
-                    buffer_counter[collumns_2 + 1:collumns_2 + 1 + chain_length_2])
-            ), ]
+            buffer_select.eq(buffer_counter[columns_bits + 1 + chain_length_2:]),
+            buffer_address.eq(buffer_addr_cat),
+        ]
         # TODO Check if data & adress match
         self.sync += [
             If(gamma_data_valid,
@@ -319,24 +369,29 @@ class RamAddressGenerator(Module):
         self,
         start: Signal(1),
         enable: Signal(1),
-        row: Signal(4),
+        row,  # Row address signal
         image_width: Signal(16),
         panel_config,
-        collumns_2,
-        chain_length_2,
+        columns=96,
+        rows_per_half=24,
+        chain_length_2=0,
     ):
         outputs_2 = 3
-        counter = Signal(collumns_2 + 1 + chain_length_2 + outputs_2)
+        columns_bits = (columns - 1).bit_length()  # e.g., 7 for 96 columns
+        counter = Signal(columns_bits + 1 + chain_length_2 + outputs_2)
         running = Signal(1)
         self.started = Signal()
         delay = 2
         en = Signal()
         counter_select = Signal(chain_length_2 + outputs_2)
 
+        # Total count: columns * 2 (halves) * chains * outputs
+        counter_max = columns * 2 * (1 << chain_length_2) * 8 - 1
+
         # Started
         self.comb += [
             en.eq((counter < delay) | enable),
-            counter_select.eq(counter[(collumns_2 + 1):]),
+            counter_select.eq(counter[(columns_bits + 1):]),
             running.eq(start | (counter != 0)),
         ]
         self.sync += [
@@ -345,8 +400,7 @@ class RamAddressGenerator(Module):
                 self.started.eq(True),
                 counter.eq(1))
             .Elif(counter == 0)
-            .Elif((counter == (
-                (1 << (collumns_2 + 1 + chain_length_2 + outputs_2)) - 1)) & en,
+            .Elif((counter == counter_max) & en,
                 counter.eq(0))
             .Elif((counter > 0) & en,
                   counter.eq(counter + 1)),
@@ -356,8 +410,8 @@ class RamAddressGenerator(Module):
         cur_panel_config = Signal().like(panel_config[0].storage)
         config_lookup_valid = Signal()
         counter_previous = Signal().like(counter)
-        collumn = counter_previous[:collumns_2]
-        half_select = counter_previous[collumns_2]
+        collumn = counter_previous[:columns_bits]
+        half_select = counter_previous[columns_bits]
         self.sync += [
             If(en,
                 cur_panel_config.eq(panel_config[counter_select].storage),
@@ -368,20 +422,22 @@ class RamAddressGenerator(Module):
         # Delay 2
         self.adr = Signal(32)
         self.valid = Signal(1)
-        row_comb = Signal(6)
-        x_offset = Signal(6)
-        y_offset = Signal(6)
+        # Signal sizes depend on panel configuration
+        row_comb = Signal(7)  # Enough for rows_per_half * 2
+        x_offset = Signal(columns_bits)
+        y_offset = Signal(7)
+        col_max = columns - 1
         self.comb += [
-            row_comb.eq(half_select * 16 + row),
+            row_comb.eq(half_select * rows_per_half + row),  # Top: 0 to rows_per_half-1, Bottom: rows_per_half to rows-1
             Case((cur_panel_config >> 16) & 0x3, {
                  0b00: [x_offset.eq(collumn),
                         y_offset.eq(row_comb)],
-                 0b01: [x_offset.eq(31 - row_comb),
+                 0b01: [x_offset.eq((rows_per_half - 1) - row_comb),
                         y_offset.eq(collumn)],
-                 0b10: [x_offset.eq(63 - collumn),
-                        y_offset.eq(31 - row_comb)],
+                 0b10: [x_offset.eq(col_max - collumn),
+                        y_offset.eq((rows_per_half - 1) - row_comb)],
                  0b11:[x_offset.eq(row_comb),
-                       y_offset.eq(63 - collumn)],
+                       y_offset.eq(col_max - collumn)],
                  })
         ]
         self.sync += [
@@ -403,13 +459,14 @@ class RowModule(Module):
         self,
         start: Signal(1),
         clk: Signal(1),
-        collumns_2,
-        chain_length_2,
+        columns=96,
+        chain_length_2=0,
     ):
         pipeline_delay = 1  # Can't change
         output_delay = 2
         delay = pipeline_delay + output_delay
-        counter_max = (1 << (collumns_2 + chain_length_2 + 1)) + delay
+        # Counter max: columns * 2 (halves) * chain_length + delay
+        counter_max = columns * 2 * (1 << chain_length_2) + delay
         self.counter = counter = Signal(max=counter_max)
         buffer_counter = Signal(max=counter_max)
         self.buffer_select = buffer_select = Signal(1)
