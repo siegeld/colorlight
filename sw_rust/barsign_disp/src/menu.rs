@@ -52,6 +52,7 @@ impl Context {
                 let h = if w > 0 { (len / w as u32) as u16 } else { return };
                 if h == 0 { return; }
                 self.hub75.write_img_data(0, crate::patterns::animated_rainbow(w, h, *phase));
+                self.hub75.swap_buffers();
             }
         }
     }
@@ -235,6 +236,7 @@ fn default_image(
     let image = img::load_default_image();
     hub75.set_img_param(image.0, image.1);
     hub75.write_img_data(0, image.3);
+    hub75.swap_buffers();
     hub75.set_mode(OutputMode::FullColor);
     hub75.on();
 }
@@ -250,6 +252,7 @@ fn default_indexed_image(
     let image = img::load_default_indexed_image();
     hub75.set_img_param(image.0, image.1);
     hub75.write_img_data(0, image.3);
+    hub75.swap_buffers();
     hub75.set_mode(OutputMode::Indexed);
     hub75.set_palette(0, image.4);
     hub75.on();
@@ -267,6 +270,7 @@ fn load_spi_image(
     hub75.set_img_param(image.0, image.1);
     hub75.set_panel_params(image.2);
     hub75.write_img_data(0, image.3);
+    hub75.swap_buffers();
     // TODO indexed
     hub75.on();
 }
@@ -468,6 +472,7 @@ fn pattern(
         }
     }
 
+    hub75.swap_buffers();
     hub75.set_mode(OutputMode::FullColor);
     hub75.on();
     writeln!(context.output, "Pattern '{}' loaded ({}x{})", name, w, h).unwrap();

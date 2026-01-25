@@ -102,10 +102,12 @@ fn main() -> ! {
     if let Ok(image) = img::load_image(flash.read_image()) {
         hub75.set_img_param(image.0, image.1);
         hub75.write_img_data(0, image.3);
+        hub75.swap_buffers();
     } else {
         let image = img::load_default_image();
         hub75.set_img_param(image.0, image.1);
         hub75.write_img_data(0, image.3);
+        hub75.swap_buffers();
     }
 
     // Configure panel: single 128x64 panel, one chain position
@@ -145,9 +147,9 @@ fn main() -> ! {
 
         iface.poll(time).ok();
 
-        // Update animation at ~10fps (every 100ms) — slow enough that
-        // the full-frame SDRAM rewrite isn't visible as a scan line
-        if time_ms % 100 == 0 {
+        // Update animation at ~30fps (every 33ms)
+        // Double buffering prevents tearing from SDRAM rewrite
+        if time_ms % 33 == 0 {
             r.context.animation_tick();
         }
 

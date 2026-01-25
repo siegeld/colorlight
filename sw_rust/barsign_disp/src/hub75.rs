@@ -3,11 +3,22 @@ use litex_pac as pac;
 const CHAIN_LENGTH: u8 = 1;  // Matches chain_length_2=0 in gateware (single 128x64 panel)
 const OUTPUTS: u8 = 8;
 
+// Framebuffer layout in SDRAM (addresses in 32-bit words)
+const FB_SDRAM_OFFSET_BYTES: u32 = 0x00400000 / 2;
+const FB_TOTAL_WORDS: usize = 0x00400000 / 2 / 4;  // 131072 words total
+const FB_HALF_WORDS: usize = FB_TOTAL_WORDS / 2;    // 65536 words per buffer
+const FB_BASE_WORDS: u32 = FB_SDRAM_OFFSET_BYTES / 4; // 0x80000 - gateware word address
+
 pub struct Hub75 {
     hub75: pac::Hub75,
+    /// Back buffer: CPU writes here via write_img_data()
     hub75_data: &'static mut [u32],
+    /// Front buffer: HW reads from here for display
+    display_buffer: &'static mut [u32],
     hub75_palette: pac::Hub75Palette,
     length: u32,
+    /// Which half the HW is currently reading (0 or 1)
+    active_buf: u8,
 }
 
 pub enum OutputMode {
@@ -17,18 +28,24 @@ pub enum OutputMode {
 
 impl Hub75 {
     pub fn new(hub75: pac::Hub75, hub75_palette: pac::Hub75Palette) -> Self {
-        let hub75_data = unsafe {
-            core::slice::from_raw_parts_mut(
-                (0x90000000u32 + 0x00400000 / 2) as *mut u32,
-                0x00400000 / 2 / 4,
-            )
+        let base = (0x90000000u32 + FB_SDRAM_OFFSET_BYTES) as *mut u32;
+        let buf0 = unsafe {
+            core::slice::from_raw_parts_mut(base, FB_HALF_WORDS)
         };
+        let buf1 = unsafe {
+            core::slice::from_raw_parts_mut(base.add(FB_HALF_WORDS), FB_HALF_WORDS)
+        };
+
+        // HW starts reading from buffer 0 (gateware reset value = FB_BASE_WORDS)
+        unsafe { hub75.fb_base().write(|w| w.offset().bits(FB_BASE_WORDS)) };
 
         Self {
             hub75,
-            hub75_data,
+            hub75_data: buf1,       // back buffer (CPU writes here)
+            display_buffer: buf0,   // front buffer (HW reads here)
             hub75_palette,
             length: 0,
+            active_buf: 0,
         }
     }
 
@@ -54,6 +71,7 @@ impl Hub75 {
         }
     }
 
+    /// Write pixel data to the back buffer (not yet displayed)
     pub fn write_img_data(&mut self, offset: usize, data: impl Iterator<Item = u32>) {
         let sdram = self.hub75_data[offset..].iter_mut();
         for (sdram, data) in sdram.zip(data).take(self.length as usize - offset) {
@@ -61,8 +79,22 @@ impl Hub75 {
         }
     }
 
+    /// Swap front and back buffers. The back buffer becomes visible and
+    /// the old front buffer becomes available for writing.
+    pub fn swap_buffers(&mut self) {
+        core::mem::swap(&mut self.hub75_data, &mut self.display_buffer);
+        self.active_buf ^= 1;
+        let base = if self.active_buf == 1 {
+            FB_BASE_WORDS + FB_HALF_WORDS as u32
+        } else {
+            FB_BASE_WORDS
+        };
+        unsafe { self.hub75.fb_base().write(|w| w.offset().bits(base)) };
+    }
+
+    /// Read pixel data from the front buffer (what's currently displayed)
     pub fn read_img_data(&'_ self) -> impl Iterator<Item = u32> + '_ {
-        self.hub75_data[0..self.length as usize].iter().copied()
+        self.display_buffer[0..self.length as usize].iter().copied()
     }
 
     pub fn set_img_param(&mut self, width: u16, length: u32) {

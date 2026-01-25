@@ -33,6 +33,9 @@ class Hub75(Module, AutoCSR):
             CSRField("enabled", description="Enable the output"),
             CSRField("width", description="Width of the image", size=16),
         ])
+        self.fb_base = CSRStorage(fields=[
+            CSRField("offset", description="Framebuffer base address in 32-bit words", size=20),
+        ], reset=sdram_offset)
         panel_config = Array()
         for panel_output in range(8):
             for chain_pos in range(1 << chain_length_2):
@@ -62,6 +65,7 @@ class Hub75(Module, AutoCSR):
         )
         self.submodules.specific = RowController(
             self.common, pins, output_config, panel_config, read_port,
+            fb_base=self.fb_base.storage,
             columns=columns, rows_per_half=rows_per_half, scan=scan,
             chain_length_2=chain_length_2
         )
@@ -142,7 +146,7 @@ class FrameController(Module):
 
 class RowController(Module):
     def __init__(self, hub75_common, outputs_specific, output_config,
-                 panel_config, read_port, columns=96, rows_per_half=24, scan=24,
+                 panel_config, read_port, fb_base=None, columns=96, rows_per_half=24, scan=24,
                  chain_length_2=0):
         self.specials.palette_memory = palette_memory = Memory(
             width=32, depth=256, name="palette"
@@ -191,6 +195,7 @@ class RowController(Module):
             mem_start, next_row,
             output_config.indexed, output_config.width, panel_config,
             read_port, row_writers[~shifting_buffer], palette_memory,
+            fb_base=fb_base,
             columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2)
         self.submodules.row_module = RowModule(
             row_start, hub75_common.clk, columns=columns, chain_length_2=chain_length_2
@@ -237,6 +242,7 @@ class RamToBufferReader(Module):
             mem_read_port,
             buffer_write_port,
             palette_memory,
+            fb_base=None,
             columns=96,
             rows_per_half=24,
             chain_length_2=0,
@@ -253,6 +259,7 @@ class RamToBufferReader(Module):
         self.submodules.reader = LiteDRAMDMAReader(mem_read_port, 16)
         self.submodules.ram_adr = RamAddressGenerator(
             start, self.reader.sink.ready & ~self.prevent_read, row, image_width, panel_config,
+            fb_base=fb_base,
             columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2)
 
         # Generate rsv_level which was removed
@@ -372,6 +379,7 @@ class RamAddressGenerator(Module):
         row,  # Row address signal
         image_width: Signal(16),
         panel_config,
+        fb_base=None,
         columns=96,
         rows_per_half=24,
         chain_length_2=0,
@@ -440,11 +448,13 @@ class RamAddressGenerator(Module):
                        y_offset.eq(col_max - collumn)],
                  })
         ]
+        # Use fb_base CSR if provided, otherwise fall back to hardcoded offset
+        base_addr = fb_base if fb_base is not None else sdram_offset
         self.sync += [
             If(en,
                self.valid.eq(config_lookup_valid),
                 self.adr.eq(
-                    sdram_offset
+                    base_addr
                     + (y_offset +
                         ((cur_panel_config >> 8) & 0xFF) * 32)
                     * image_width + x_offset
