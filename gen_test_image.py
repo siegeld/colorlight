@@ -32,27 +32,19 @@ def create_test_image(columns, rows, output_path):
     MAGENTA = struct.pack('<I', 0x00ff00ff)
     CYAN = struct.pack('<I', 0x00ffff00)
 
-    # Row 0 - white line at top
-    for col in range(columns):
-        offset = HEADER_SIZE + 0 * ROW_SIZE + col * 4
-        data[offset:offset+4] = WHITE
-
-    # Row at middle of top half (rows_per_half // 2)
-    rows_per_half = rows // 2
-    mid_top = rows_per_half // 2
-    for col in range(columns):
-        offset = HEADER_SIZE + mid_top * ROW_SIZE + col * 4
-        data[offset:offset+4] = WHITE
-
-    # Row at start of bottom half
-    for col in range(columns):
-        offset = HEADER_SIZE + rows_per_half * ROW_SIZE + col * 4
-        data[offset:offset+4] = WHITE
-
-    # Row at bottom - 1 (last visible row)
-    for col in range(columns):
-        offset = HEADER_SIZE + (rows - 2) * ROW_SIZE + col * 4
-        data[offset:offset+4] = WHITE
+    # Horizontal lines - equally spaced from top to bottom
+    # 5 lines: row 0, 1/4, 1/2, 3/4, and last row
+    horizontal_rows = [
+        0,                      # top
+        rows // 4,              # 1/4
+        rows // 2,              # 1/2
+        3 * rows // 4,          # 3/4
+        rows - 1,               # bottom (very last row)
+    ]
+    for row in horizontal_rows:
+        for col in range(columns):
+            offset = HEADER_SIZE + row * ROW_SIZE + col * 4
+            data[offset:offset+4] = WHITE
 
     # Vertical lines - evenly spaced
     # Column 0: RED
@@ -95,7 +87,7 @@ def create_test_image(columns, rows, output_path):
     print(f"Created test image: {output_path}")
     print(f"  Panel: {columns}x{rows}")
     print(f"  Size: {len(data)} bytes")
-    print(f"  Horizontal lines at rows: 0, {mid_top}, {rows_per_half}, {rows-2}")
+    print(f"  Horizontal lines at rows: {horizontal_rows}")
     print(f"  Vertical lines at cols: {[c for c, _ in vertical_lines]}")
     print(f"  Diagonal lines: X pattern (CYAN top-left to bottom-right, MAGENTA top-right to bottom-left)")
 
