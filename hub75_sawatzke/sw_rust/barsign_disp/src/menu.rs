@@ -6,7 +6,7 @@ use crate::hal;
 use crate::hub75::{Hub75, OutputMode};
 use crate::img_flash::Flash;
 use heapless::Vec;
-use litex_pac::pac;
+use litex_pac as pac;
 pub use menu::Runner;
 use menu::*;
 

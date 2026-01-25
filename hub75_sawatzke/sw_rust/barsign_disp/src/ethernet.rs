@@ -165,6 +165,11 @@ impl IpMacData {
         Self { ip: ip.ip, mac }
     }
 
+    /// Create IpMacData with a fixed MAC address (for debugging)
+    pub fn from_fixed(ip: IpData, mac: [u8; 6]) -> Self {
+        Self { ip: ip.ip, mac }
+    }
+
     pub fn get_mac_be(&self) -> u64 {
         let mut mac_be: u64 = 0;
         for byte in self.mac {

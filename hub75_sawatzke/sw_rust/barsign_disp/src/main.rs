@@ -5,6 +5,7 @@ use core::convert::TryInto;
 use core::fmt::Write as _;
 
 use barsign_disp::*;
+use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::serial::Write;
 use embedded_hal::serial::Read;
 use ethernet::{Eth, IpData, IpMacData};
@@ -14,7 +15,7 @@ use litex_pac as pac;
 use riscv_rt::entry;
 use smoltcp::iface::{InterfaceBuilder, NeighborCache};
 use smoltcp::socket::{TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer};
-use smoltcp::time::{Duration, Instant};
+use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
 
 #[entry]
@@ -31,38 +32,33 @@ fn main() -> ! {
     let mut flash = img_flash::Flash::new(peripherals.spiflash_mmap);
     let mut delay = TIMER {
         registers: peripherals.timer0,
-        sys_clk: 50_000_000,
+        sys_clk: 40_000_000,  // 40MHz system clock
     };
+
+    let ip_data = IpData {
+        ip: [10, 11, 6, 250],
+    };
+
+    // Use a fixed MAC address for easier debugging
+    // This matches the default in colorlight.py (0x10e2d5000001)
+    let mac_bytes: [u8; 6] = [0x10, 0xe2, 0xd5, 0x00, 0x00, 0x01];
+
+    // Print startup info before ip_data is moved
+    writeln!(serial, "IP: {}.{}.{}.{}",
+        ip_data.ip[0], ip_data.ip[1], ip_data.ip[2], ip_data.ip[3]).ok();
+    writeln!(serial, "MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        mac_bytes[0], mac_bytes[1], mac_bytes[2],
+        mac_bytes[3], mac_bytes[4], mac_bytes[5]).ok();
+
+    let ip_mac = IpMacData::from_fixed(ip_data, mac_bytes);
+
     let mut buffer = [0u8; 64];
     let out_data = heapless::Vec::new();
     let output = menu::Output { serial, out_data };
-    // TODO First read ip & mac, and after setting them print them again to verify it worked
-    // TODO spi-memory make command public to read unique id
-    // TODO unique id length is dependent on the chip, so read jedec id
 
-    let ip_data = IpData {
-        ip: [192, 168, 1, 49],
-    };
-
-    let ip_mac = IpMacData::new(ip_data, &[0xde, 0xad, 0xbe, 0xef]);
-    let mac_be = ip_mac.get_mac_be();
-
-    peripherals
-        .ethmac
-        .mac_address1()
-        .write(|w| unsafe { w.bits((mac_be >> 32) as u32) });
-    peripherals
-        .ethmac
-        .mac_address0()
-        .write(|w| unsafe { w.bits((mac_be & 0xFFFFFFFF) as u32) });
-
+    // Standard LiteEth doesn't need hardware MAC/IP configuration
+    // All packet handling is done in software via smoltcp
     let ip_address = IpAddress::Ipv4(Ipv4Address(ip_mac.ip));
-
-    peripherals.ethmac.ip_address().write(|w| unsafe {
-        w.bits(u32::from_be_bytes(
-            ip_address.as_bytes().try_into().unwrap(),
-        ))
-    });
     let device = Eth::new(peripherals.ethmac, peripherals.ethmem);
     let mut neighbor_cache_entries = [None; 8];
     let neighbor_cache = NeighborCache::new(&mut neighbor_cache_entries[..]);
@@ -99,12 +95,13 @@ fn main() -> ! {
     let tcp_server_handle = iface.add_socket(tcp_server_socket);
     let udp_server_handle = iface.add_socket(udp_server_socket);
 
+    // Always turn on HUB75 for debugging (shows firmware is running)
+    hub75.on();
+
     if let Ok(image) = img::load_image(flash.read_image()) {
         hub75.set_img_param(image.0, image.1);
         hub75.set_panel_params(image.2);
         hub75.write_img_data(0, image.3);
-        // TODO indexed
-        hub75.on();
     }
 
     let context = menu::Context {
@@ -116,9 +113,24 @@ fn main() -> ! {
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
 
-    let mut time = Instant::from_millis(0);
+    writeln!(r.context.output.serial, "Starting network loop...").ok();
+
+    let mut time_ms: i64 = 0;
     let mut telnet_active = false;
+    let mut loop_counter: u32 = 0;
+
     loop {
+        // Use real timing: poll every 1ms
+        delay.delay_ms(1u32);
+        time_ms += 1;
+        let time = Instant::from_millis(time_ms);
+
+        loop_counter = loop_counter.wrapping_add(1);
+        // Print status every 10 seconds to show we're alive (on serial)
+        if loop_counter % 10000 == 0 {
+            writeln!(r.context.output.serial, "Alive: {} loops, {}ms", loop_counter, time_ms).ok();
+        }
+
         iface.poll(time).ok();
         // match iface.poll(time) {
         //     Ok(_) => {}
@@ -128,10 +140,10 @@ fn main() -> ! {
         // tcp:23: telnet for menu
         {
             let socket = iface.get_socket::<TcpSocket>(tcp_server_handle);
-            if !socket.is_open() & socket.listen(23).is_err() {
+            if !socket.is_open() && socket.listen(23).is_err() {
                 writeln!(r.context.output.serial, "Couldn't listen to telnet port").ok();
             }
-            if !telnet_active & socket.is_active() {
+            if !telnet_active && socket.is_active() {
                 r.context.output.out_data.clear();
                 r.context
                     .output
@@ -179,7 +191,7 @@ fn main() -> ! {
         // udp:6454: artnet
         {
             let socket = iface.get_socket::<UdpSocket>(udp_server_handle);
-            if !socket.is_open() & !socket.bind(6454).is_ok() {
+            if !socket.is_open() && socket.bind(6454).is_err() {
                 writeln!(r.context.output.serial, "Couldn't open artnet port").ok();
             }
 
@@ -204,15 +216,5 @@ fn main() -> ! {
         if let Ok(data) = r.context.output.serial.read() {
             r.input_byte(if data == b'\n' { b'\r' } else { data });
         }
-
-        // match iface.poll_delay(&sockets, time) {
-        //     Some(Duration { millis: 0 }) => {}
-        //     Some(delay_duration) => {
-        //         // delay.delay_ms(delay_duration.total_millis() as u32);
-        //         time += delay_duration
-        //     }
-        //     None => time += Duration::from_millis(1),
-        // }
-        time += Duration::from_millis(1);
     }
 }

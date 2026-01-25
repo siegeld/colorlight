@@ -241,27 +241,11 @@ class SmolEth(Module, AutoCSR):
             + [self.ip_address, self.mac_address]
         )
 
-        self.submodules.splitter = SmolEthStreamSplitter(eth_phy_description(dw))
-
-        # Hardware UDP/IP "Stack"
-        self.submodules.udp = SmolEthUDP(udp_port, dw)
-        self.submodules.ip = SmolEthIP(self.ip_address.storage, udp_protocol, dw)
-        self.submodules.mac_filter = SmolEthMACFilter(self.mac_address.storage, dw)
-
-        self.submodules.invalidator = SmolEthInvalidator(
-            # Minimum of words that are required for a packet processed by the hardware
-            # Avoids dropping the next packet in the first few words if the hardware has a bit of latency
-            60 // 4,
-            eth_phy_description(dw),
-        )
+        # SIMPLIFIED: Direct connection to CPU, no hardware filtering
+        # This bypasses splitter/invalidator/mac_filter to debug basic ethernet
         self.comb += [
-            self.core.source.connect(self.splitter.sink),
-            self.interface.source.connect(self.core.sink),
-            self.splitter.source1.connect(self.invalidator.sink),
-            self.splitter.source2.connect(self.mac_filter.sink),
-            self.mac_filter.source.connect(self.ip.sink),
-            self.ip.source.connect(self.udp.sink),
-            self.invalidator.source.connect(self.interface.sink),
+            self.core.source.connect(self.interface.sink),  # PHY RX → CPU
+            self.interface.source.connect(self.core.sink),  # CPU TX → PHY
         ]
 
     def get_csrs(self):

@@ -51,7 +51,7 @@ from litespi.opcodes import SpiNorFlashOpCodes as Codes
 from litespi.phy.generic import LiteSPIPHY
 from litespi import LiteSPI
 
-# from smoleth import SmolEth  # Replaced with add_etherbone for ICMP support
+from smoleth import SmolEth  # Provides MAC access for CPU (telnet, ARP handled in firmware)
 
 import hub75
 
@@ -240,19 +240,22 @@ class BaseSoC(SoCCore):
             rx_delay=2e-9,
         )
 
-        eth_ip_address = ip_address
-        etherbone_mac = 0x10e2d5000000
+        # Parse IP address string to integer
+        ip_parts = [int(x) for x in ip_address.split(".")]
+        eth_ip_address = (ip_parts[0] << 24) | (ip_parts[1] << 16) | (ip_parts[2] << 8) | ip_parts[3]
+        eth_mac_address = 0x10e2d5000001
 
-        # Add etherbone with hardware UDP/IP stack (handles ICMP ping, etherbone)
-        # Note: with_ethmac=False - ethmac breaks ARP for unknown reasons
-        # Telnet requires ethmac but that needs further debugging
-        self.add_etherbone(
-            phy=self.ethphy,
-            ip_address=eth_ip_address,
-            mac_address=etherbone_mac,
-            with_ethmac=False,
+        # Standard LiteEth MAC - provides raw ethernet access to CPU
+        # Rust firmware handles ARP/ICMP/TCP via smoltcp
+        self.add_ethernet(
+            phy=phy,
+            nrxslots=2,
+            ntxslots=2,
+            local_ip=ip_address,
+            remote_ip="10.11.6.65",  # Not used, but required
         )
 
+        # Timing constraints
         eth_rx_clk = getattr(phy, "crg", phy).cd_eth_rx.clk
         eth_tx_clk = getattr(phy, "crg", phy).cd_eth_tx.clk
         self.platform.add_period_constraint(eth_rx_clk, 1e9 / phy.rx_clk_freq)
