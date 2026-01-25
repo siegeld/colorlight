@@ -2,7 +2,6 @@ use core::fmt::Write;
 use embedded_hal::prelude::_embedded_hal_serial_Write;
 
 use crate::bitmap_udp::BitmapStats;
-use crate::ethernet::IpMacData;
 use crate::hal;
 use crate::hub75::{Hub75, OutputMode};
 use crate::img_flash::Flash;
@@ -39,7 +38,7 @@ pub struct Context {
     pub output: Output,
     pub hub75: Hub75,
     pub flash: Flash,
-    pub ip_mac: IpMacData,
+    pub mac: [u8; 6],
     pub animation: Animation,
     pub quit: bool,
     pub debug: bool,

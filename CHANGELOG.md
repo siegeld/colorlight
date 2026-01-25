@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.5] - 2026-01-25
+
+### Added
+- **DHCP client** - Firmware now acquires IP address via DHCP at boot using smoltcp's `Dhcpv4Socket`
+  - Falls back to static IP `10.11.6.250/24` after 10 seconds if no DHCP server responds
+  - Applies gateway route from DHCP server when provided
+  - Logs IP assignment and lease loss to serial and telnet output
+- **Unique MAC from SPI flash** - Reads the W25Q32JV 64-bit factory unique ID at boot and derives a locally-administered MAC address (`02:xx:xx:xx:xx:xx`)
+  - Each board gets a deterministic, unique MAC without manual configuration
+  - XOR-folds the 8-byte UID into 5 bytes, prepends `0x02` (locally administered, unicast)
+- **`flash_id.rs` module** - New firmware module for reading flash unique ID via SPI master CSRs
+
+### Changed
+- **Gateware**: Added `with_master=True` to LiteSPI instantiation (explicit raw SPI command support)
+- **Network init**: Interface starts with unspecified IP and routing table; DHCP configures both
+- **Context**: Replaced `IpMacData` with plain `mac: [u8; 6]` (IP is now dynamic)
+- Removed unused `IpData`, `IpMacData` types from `ethernet.rs`
+
+---
+
 ## [0.2.4] - 2026-01-25
 
 ### Added
@@ -122,6 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.5 | 2026-01-25 | DHCP client with unique MAC from SPI flash |
 | 0.2.4 | 2026-01-25 | Bitmap UDP protocol for sending images |
 | 0.2.3 | 2026-01-25 | Telnet IAC filtering and quit command |
 | 0.2.2 | 2026-01-25 | Framebuffer double buffering via fb_base CSR |

@@ -3,6 +3,7 @@
 pub mod artnet;
 pub mod bitmap_udp;
 pub mod ethernet;
+pub mod flash_id;
 pub mod hal;
 pub mod hub75;
 pub mod img;

@@ -9,15 +9,18 @@ use bitmap_udp::BitmapReceiver;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::serial::Write;
 use embedded_hal::serial::Read;
-use ethernet::{Eth, IpData, IpMacData};
+use ethernet::Eth;
 use hal::*;
 use heapless::Vec;
 use litex_pac as pac;
 use riscv_rt::entry;
-use smoltcp::iface::{InterfaceBuilder, NeighborCache};
-use smoltcp::socket::{TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer};
+use smoltcp::iface::{InterfaceBuilder, NeighborCache, Routes};
+use smoltcp::socket::{
+    Dhcpv4Event, Dhcpv4Socket, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket,
+    UdpSocketBuffer,
+};
 use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
+use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
 #[entry]
 fn main() -> ! {
@@ -30,45 +33,42 @@ fn main() -> ! {
     serial.bwrite_all(b"Hello world!\n").unwrap();
 
     let mut hub75 = hub75::Hub75::new(peripherals.hub75, peripherals.hub75_palette);
+
+    // Read flash unique ID before Flash takes ownership of SPI peripheral
+    let unique_id = flash_id::read_flash_unique_id(&peripherals.spiflash_mmap);
+    let mac_bytes = flash_id::derive_mac(&unique_id);
+
     let mut flash = img_flash::Flash::new(peripherals.spiflash_mmap);
     let mut delay = TIMER {
         registers: peripherals.timer0,
         sys_clk: 40_000_000,  // 40MHz system clock
     };
 
-    let ip_data = IpData {
-        ip: [10, 11, 6, 250],
-    };
-
-    // Use a fixed MAC address for easier debugging
-    // This matches the default in colorlight.py (0x10e2d5000001)
-    let mac_bytes: [u8; 6] = [0x10, 0xe2, 0xd5, 0x00, 0x00, 0x01];
-
-    // Print startup info before ip_data is moved
-    writeln!(serial, "IP: {}.{}.{}.{}",
-        ip_data.ip[0], ip_data.ip[1], ip_data.ip[2], ip_data.ip[3]).ok();
+    // Print startup info
+    writeln!(serial, "Flash UID: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        unique_id[0], unique_id[1], unique_id[2], unique_id[3],
+        unique_id[4], unique_id[5], unique_id[6], unique_id[7]).ok();
     writeln!(serial, "MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
         mac_bytes[0], mac_bytes[1], mac_bytes[2],
         mac_bytes[3], mac_bytes[4], mac_bytes[5]).ok();
-
-    let ip_mac = IpMacData::from_fixed(ip_data, mac_bytes);
 
     let mut buffer = [0u8; 64];
     let out_data = heapless::Vec::new();
     let mut output = menu::Output { serial, out_data };
 
-    // Standard LiteEth doesn't need hardware MAC/IP configuration
-    // All packet handling is done in software via smoltcp
-    let ip_address = IpAddress::Ipv4(Ipv4Address(ip_mac.ip));
+    // Start with no IP — DHCP will configure it
     let device = Eth::new(peripherals.ethmac, peripherals.ethmem);
     let mut neighbor_cache_entries = [None; 8];
     let neighbor_cache = NeighborCache::new(&mut neighbor_cache_entries[..]);
-    let mut ip_addrs = [IpCidr::new(ip_address, 24)];
-    let mut sockets_entries: [_; 3] = Default::default();
+    let mut ip_addrs = [IpCidr::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0)];
+    let mut routes_storage = [None; 1];
+    let routes = Routes::new(&mut routes_storage[..]);
+    let mut sockets_entries: [_; 4] = Default::default();
     let mut iface = InterfaceBuilder::new(device, &mut sockets_entries[..])
-        .hardware_addr(EthernetAddress::from_bytes(&ip_mac.mac).into())
+        .hardware_addr(EthernetAddress::from_bytes(&mac_bytes).into())
         .neighbor_cache(neighbor_cache)
         .ip_addrs(&mut ip_addrs[..])
+        .routes(routes)
         .finalize();
 
     let tcp_server_socket = {
@@ -107,9 +107,12 @@ fn main() -> ! {
         UdpSocket::new(rx, tx)
     };
 
+    let dhcp_socket = Dhcpv4Socket::new();
+
     let tcp_server_handle = iface.add_socket(tcp_server_socket);
     let udp_server_handle = iface.add_socket(udp_server_socket);
     let bitmap_udp_handle = iface.add_socket(bitmap_udp_socket);
+    let dhcp_handle = iface.add_socket(dhcp_socket);
 
     // Always turn on HUB75 for debugging (shows firmware is running)
     hub75.on();
@@ -134,7 +137,7 @@ fn main() -> ! {
     writeln!(output.serial, "Panel config set: p0_0=({},{},{})", x0, y0, r0).ok();
 
     let context = menu::Context {
-        ip_mac,
+        mac: mac_bytes,
         output,
         hub75,
         flash,
@@ -164,6 +167,42 @@ fn main() -> ! {
         loop_counter = loop_counter.wrapping_add(1);
 
         iface.poll(time).ok();
+
+        // DHCP: poll for configuration changes
+        {
+            let socket = iface.get_socket::<Dhcpv4Socket>(dhcp_handle);
+            if let Some(event) = socket.poll() {
+                match event {
+                    Dhcpv4Event::Configured(config) => {
+                        writeln!(r.context.output, "DHCP: {}", config.address).ok();
+                        iface.update_ip_addrs(|addrs| {
+                            addrs[0] = IpCidr::Ipv4(config.address);
+                        });
+                        if let Some(router) = config.router {
+                            iface.routes_mut().add_default_ipv4_route(router).ok();
+                        }
+                    }
+                    Dhcpv4Event::Deconfigured => {
+                        writeln!(r.context.output, "DHCP: lost lease").ok();
+                        iface.update_ip_addrs(|addrs| {
+                            addrs[0] = IpCidr::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0);
+                        });
+                        iface.routes_mut().remove_default_ipv4_route();
+                    }
+                }
+            }
+        }
+
+        // Static IP fallback after 10 seconds if DHCP hasn't configured an address
+        if time_ms == 10_000 {
+            if iface.ip_addrs()[0].address() == IpAddress::Ipv4(Ipv4Address::UNSPECIFIED) {
+                let fallback = Ipv4Cidr::new(Ipv4Address([10, 11, 6, 250]), 24);
+                writeln!(r.context.output, "DHCP timeout, using {}", fallback).ok();
+                iface.update_ip_addrs(|addrs| {
+                    addrs[0] = IpCidr::Ipv4(fallback);
+                });
+            }
+        }
 
         // Update animation at ~30fps (every 33ms)
         // Double buffering prevents tearing from SDRAM rewrite

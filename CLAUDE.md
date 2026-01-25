@@ -8,6 +8,8 @@
 |-----------|--------|-------|
 | Bitstream | Working | 40MHz, passes timing |
 | Firmware | Working | Rust, smoltcp TCP/IP |
+| DHCP | Working | Auto IP via smoltcp Dhcpv4Socket, 10s fallback to static |
+| Unique MAC | Working | Derived from SPI flash 64-bit unique ID (02:xx:xx:xx:xx:xx) |
 | Ping | Working | Via smoltcp ICMP |
 | Telnet | Working | Port 23, IAC filtering, quit command |
 | Animation | Working | 30fps double-buffered via fb_base CSR |
@@ -44,10 +46,12 @@
 
 ### Network Stack
 
-The firmware uses **smoltcp** (Rust TCP/IP stack) for all network handling:
+The firmware uses **smoltcp** (Rust TCP/IP stack, v0.8) for all network handling:
 
 - **LiteEth MAC** provides raw ethernet frame access via Wishbone
-- **smoltcp** handles ARP, ICMP, TCP, UDP in software
+- **smoltcp** handles ARP, ICMP, TCP, UDP, DHCP in software
+- **DHCPv4** client acquires IP at boot; falls back to `10.11.6.250/24` after 10 seconds
+- **Unique MAC** derived from SPI flash factory unique ID (locally-administered `02:xx:xx:xx:xx:xx`)
 - **No hardware ARP/ICMP** - different from etherbone approach
 
 This design was chosen to enable TCP (telnet) which hardware-only stacks don't support.
@@ -59,12 +63,16 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | `colorlight.py` | LiteX SoC definition, peripheral instantiation |
 | `hub75.py` | HUB75 display driver gateware (includes `fb_base` CSR) |
 | `smoleth.py` | Custom ethernet module (currently unused, kept for reference) |
-| `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, network loop, telnet IAC parser |
+| `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, network loop, DHCP, telnet IAC parser |
 | `sw_rust/barsign_disp/src/hub75.rs` | HUB75 driver: double-buffered framebuffer, swap_buffers() |
 | `sw_rust/barsign_disp/src/menu.rs` | Telnet CLI commands (pattern, quit, animation) |
+| `sw_rust/barsign_disp/src/flash_id.rs` | Read SPI flash unique ID, derive MAC address |
 | `sw_rust/barsign_disp/src/patterns.rs` | Test pattern generators (grid, rainbow, animated_rainbow) |
 | `sw_rust/barsign_disp/src/ethernet.rs` | smoltcp device driver |
 | `sw_rust/litex-pac/` | Generated peripheral access crate |
+| `tools/send_image.py` | Send image files to panel via UDP port 7000 |
+| `tools/send_test_pattern.py` | Generate and send test patterns (gradient, bars, rainbow, heart) |
+| `tools/send_animation.py` | Send animated patterns (pulsing heart) at configurable FPS |
 
 ## Build Commands
 
@@ -188,39 +196,71 @@ if !socket.is_open() && socket.listen(23).is_err()
 
 Since serial access isn't available, use these techniques:
 
-1. **Check ARP MAC** - If MAC matches firmware config, firmware is running
+1. **Check ARP MAC** - Firmware uses a `02:xx:xx:xx:xx:xx` MAC (locally administered, derived from flash UID). BIOS uses `10:e2:d5:00:00:00`. If ARP shows `02:...`, firmware is running.
    ```bash
    ping -c1 <ip> && arp -n <ip>
    ```
 
-2. **tcpdump** - Watch for TFTP requests (means BIOS, not firmware)
+2. **Watch DHCP** - Firmware sends DHCP Discover at boot. If you see DHCP traffic with a `02:` MAC, firmware is running.
+   ```bash
+   sudo tcpdump -i <iface> udp port 67 or port 68
+   ```
+
+3. **tcpdump for TFTP** - TFTP requests mean BIOS (not firmware) is running
    ```bash
    sudo tcpdump -i <iface> host <ip> and udp port 69
    ```
 
-3. **HUB75 output** - `hub75.on()` is called at startup; display should activate
+4. **HUB75 output** - `hub75.on()` is called at startup; display should activate
 
 ## Firmware Configuration
 
-### IP Address
+### IP Address (DHCP)
+
+The firmware uses DHCP to acquire an IP address at boot. If no DHCP server responds within 10 seconds, it falls back to a static IP:
+
 ```rust
 // sw_rust/barsign_disp/src/main.rs
-let ip_data = IpData {
-    ip: [10, 11, 6, 250],
-};
+// Fallback after 10s with no DHCP:
+let fallback = Ipv4Cidr::new(Ipv4Address([10, 11, 6, 250]), 24);
 ```
 
-### MAC Address
+### MAC Address (Dynamic)
+
+MAC is derived from the SPI flash's factory-programmed 64-bit unique ID at boot:
+
 ```rust
-// sw_rust/barsign_disp/src/main.rs
-let mac_bytes: [u8; 6] = [0x10, 0xe2, 0xd5, 0x00, 0x00, 0x01];
+// sw_rust/barsign_disp/src/flash_id.rs
+// Command 0x4B reads W25Q32JV unique ID
+// Result: 02:xx:xx:xx:xx:xx (locally administered, unicast)
+let unique_id = flash_id::read_flash_unique_id(&peripherals.spiflash_mmap);
+let mac_bytes = flash_id::derive_mac(&unique_id);
 ```
+
+Each board gets a deterministic, unique MAC. The `0x02` prefix marks it as locally administered per IEEE 802.
 
 ### System Clock
 ```rust
 // Must match bitstream (40MHz default)
 sys_clk: 40_000_000,
 ```
+
+## Tools
+
+Python tools for sending content to the panel over UDP port 7000:
+
+```bash
+# Send an image file (auto-resized to panel dimensions)
+python3 tools/send_image.py path/to/image.png --host <board-ip> --width 96 --height 48
+
+# Send a test pattern (gradient, bars, rainbow, heart)
+python3 tools/send_test_pattern.py heart --host <board-ip> --width 96 --height 48
+
+# Send animated pattern (pulsing heart at 30fps, 3 loops)
+python3 tools/send_animation.py heart --host <board-ip> --width 96 --height 48 --fps 30 --loops 3
+```
+
+All tools default to `--host 10.11.6.250 --port 7000 --width 96 --height 48`.
 
 ## Hardware Notes
 

@@ -164,6 +164,7 @@ class BaseSoC(SoCCore):
         self.submodules.spiflash_mmap = LiteSPI(
             phy=self.spiflash_phy,
             mmap_endianness=self.cpu.endianness,
+            with_master=True,
         )
         self.add_csr("spiflash_mmap")
         self.add_csr("spiflash_phy")
