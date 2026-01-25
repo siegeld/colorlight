@@ -31,13 +31,8 @@ module liteeth_core(
 	output [31:0] udp_source_ip_address,
 	output [15:0] udp_source_length,
 	output [31:0] udp_source_data,
-	output [3:0] udp_source_error,
-	output debug_ip_rx_valid,
-	output debug_udp_rx_valid
+	output [3:0] udp_source_error
 );
-
-assign debug_ip_rx_valid = ip_mac_port_source_valid;
-assign debug_udp_rx_valid = udp_source_valid;  // Final UDP output (same as user_port_source_valid)
 
 reg udpcore_reset_storage = 1'd0;
 reg udpcore_reset_re = 1'd0;
@@ -4341,7 +4336,7 @@ assign user_port_source_param_length = internal_port_source_param_length;
 always @(*) begin
 	liteethudpipcore_liteethudp_sel <= 1'd0;
 	case (crossbar_sink_param_dst_port)
-		16'd6000: begin
+		13'd6000: begin
 			liteethudpipcore_liteethudp_sel <= 1'd1;
 		end
 		default: begin

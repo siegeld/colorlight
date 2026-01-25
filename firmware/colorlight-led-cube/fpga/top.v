@@ -79,6 +79,10 @@ module top
     wire  [15:0]  udp_source_length    ;
     wire  [31:0]  udp_source_data      ;
     wire  [3:0]   udp_source_error     ;
+    wire          debug_ip_rx_valid    ;
+    wire          debug_udp_rx_valid   ;
+
+    wire phy_init_done;
 
     phy_sequencer phy_sequencer_inst (.clock(clock),
                   .reset(reset),
@@ -117,34 +121,41 @@ module top
         /* output [31:0] */ .udp_source_ip_address(udp_source_ip_address),
         /* output [15:0] */ .udp_source_length    (udp_source_length    ),
         /* output [31:0] */ .udp_source_data      (udp_source_data      ),
-        /* output [3:0]  */ .udp_source_error     (udp_source_error     )
+        /* output [3:0]  */ .udp_source_error     (udp_source_error     ),
+        /* output        */ .debug_ip_rx_valid    (debug_ip_rx_valid    ),
+        /* output        */ .debug_udp_rx_valid   (debug_udp_rx_valid   )
     );
 
-    wire [5:0]  ctrl_en;
-    wire [3:0]  ctrl_wr;
-    wire [15:0] ctrl_addr;
-    wire [23:0] ctrl_wdat;
+    // DIAGNOSTIC: Use raw 25MHz for LED to test PLL stability
+    reg [24:0] raw_counter = 25'b0;
+    always @(posedge osc25m) begin
+        raw_counter <= raw_counter + 1;
+    end
 
-    udp_panel_writer udp_inst
-                    (.clock(clock),
-                     .reset(reset),
+    // LED from raw oscillator - should blink ~0.67s if oscillator is stable
+    assign led = raw_counter[24];
 
-                     .udp_source_valid(udp_source_valid),
-                     .udp_source_last(udp_source_last),
-                     .udp_source_ready(udp_source_ready),
-                     .udp_source_src_port(udp_source_src_port),
-                     .udp_source_dst_port(udp_source_dst_port),
-                     .udp_source_ip_address(udp_source_ip_address),
-                     .udp_source_length(udp_source_length),
-                     .udp_source_data(udp_source_data),
-                     .udp_source_error(udp_source_error),
+    // Panel fill on display_clock
+    reg [25:0] fill_counter = 26'b0;
+    reg [5:0]  ctrl_en_r = 6'b0;
+    reg [15:0] ctrl_addr_r = 16'b0;
+    reg [23:0] ctrl_wdat_r = 24'b0;
 
-                     .ctrl_en(ctrl_en),
-                     .ctrl_wr(ctrl_wr),
-                     .ctrl_addr(ctrl_addr),
-                     .ctrl_wdat(ctrl_wdat),
-                     .led_reg(led)
-                     );
+    always @(posedge display_clock) begin
+        fill_counter <= fill_counter + 1;
+        ctrl_en_r <= 6'b000001;
+        ctrl_addr_r <= {4'b0, fill_counter[11:0]};
+
+        if (fill_counter[25])
+            ctrl_wdat_r <= 24'h0000FF;  // BLUE
+        else
+            ctrl_wdat_r <= 24'h00FF00;  // GREEN
+    end
+    wire [5:0]  ctrl_en = ctrl_en_r;
+    wire [3:0]  ctrl_wr = 4'b0111;
+    wire [15:0] ctrl_addr = ctrl_addr_r;
+    wire [23:0] ctrl_wdat = ctrl_wdat_r;
+    assign udp_source_ready = 1'b1;
 
     // Reduced to 1 panel to fit on ECP5-25K
     // Original design had 6 panels but that exceeds FPGA capacity
@@ -159,7 +170,7 @@ module top
     wire CLK_int;
 
     ledpanel panel_inst (
-        .ctrl_clk(clock),
+        .ctrl_clk(display_clock),  // Use same clock for write port as control logic
         .ctrl_en(ctrl_en[0]),
         .ctrl_wr(ctrl_wr),       // Which color memory block to write
         .ctrl_addr(ctrl_addr),   // Addr to write color info on [col_info][row_info]
@@ -198,4 +209,6 @@ module top
     assign LAT = LAT_int;
     assign OE  = OE_int;
     assign CLK = CLK_int;
+
+
 endmodule

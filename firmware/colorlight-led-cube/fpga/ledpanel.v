@@ -27,7 +27,7 @@ module ledpanel (
 
   parameter integer INPUT_DEPTH          = 6;    // bits of color before gamma correction
   parameter integer COLOR_DEPTH          = 6;    // bits of color after gamma correction
-  parameter integer CHAINED              = 2;    // number of 64-wide panels in chain (2 = 128x64)
+  parameter integer CHAINED              = 1;    // 64x64 panel
 
   localparam integer SIZE_BITS = $clog2(CHAINED);
   localparam integer ADDR_WIDTH = 6 + 6 + SIZE_BITS;  // addr_y (6) + addr_x (6+SIZE_BITS)

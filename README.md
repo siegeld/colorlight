@@ -1,151 +1,90 @@
-# Colorlight 5A-75E HUB75 LED Display Driver
+# Colorlight 5A-75E LED Panel Projects
 
-Drive HUB75 LED matrix panels from Python using a Colorlight 5A-75E V8.2 FPGA board.
+This repository contains two different FPGA projects for driving HUB75 LED panels using a **Colorlight 5A-75E V8.2** board.
 
-## Overview
+## Projects Overview
 
-```
-┌──────────────┐    Ethernet     ┌─────────────┐     HUB75      ┌─────────────┐
-│  Your PC     │ ──────────────► │ Colorlight  │ ─────────────► │ LED Panels  │
-│  (Python)    │   UDP pixels    │   5A-75E    │                │  (Array)    │
-└──────────────┘                 └─────────────┘                └─────────────┘
-```
+| Project | Location | Status | Features |
+|---------|----------|--------|----------|
+| **hub75_sawatzke** | `hub75_sawatzke/` | **WORKING** | LiteX SoC, VexRiscv CPU, Ethernet, ICMP ping, Etherbone |
+| **colorlight-led-cube** | `firmware/colorlight-led-cube/` | Timing issues | Verilog-only, simpler, but 125MHz fails timing |
 
-- Python generates pixel data on your PC
-- Sends UDP packets over Ethernet to the Colorlight board
-- FPGA firmware drives HUB75 panels directly
-- 6-bit color depth (64 levels per channel)
+**Recommendation:** Use the `hub75_sawatzke` project - it works reliably at 40MHz and passes timing.
 
-## Quick Start
+---
 
-```bash
-# 1. Run setup (installs dependencies, builds Docker image)
-./setup.sh
+## Quick Start (hub75_sawatzke)
 
-# 2. Build the network firmware
-./docker_build.sh firmware
-
-# 3. Connect USB Blaster to JTAG pads, power the board
-
-# 4. Flash the firmware
-./flash.sh
-
-# 5. Configure network
-./network_setup.sh
-
-# 6. Test with Python
-source venv/bin/activate
-python python/examples/test_connection.py
-```
-
-## Requirements
-
-### Host System (your PC)
-
-| Tool | Purpose |
-|------|---------|
-| Docker | Runs FPGA build tools |
-| openFPGALoader | Flashes bitstreams to FPGA |
-| Python 3 | Runs display control scripts |
-
-The FPGA toolchain (yosys, nextpnr, prjtrellis) runs inside Docker - no need to install these on your system.
-
-#### Installing on Fedora
+### 1. Build the Bitstream
 
 ```bash
-# Docker
-sudo dnf install docker
-sudo systemctl enable --now docker
-sudo usermod -aG docker $USER  # then logout/login
+cd hub75_sawatzke
 
-# openFPGALoader (build from source - not in Fedora repos)
-sudo dnf install cmake libftdi-devel libusb1-devel hidapi-devel libudev-devel
-git clone https://github.com/trabucayre/openFPGALoader /tmp/openFPGALoader
-cd /tmp/openFPGALoader
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-sudo make install
+# Build Docker image (first time only)
+docker build -t litex-hub75 .
+
+# Build bitstream with your desired IP address
+docker run --rm -v "$(pwd):/project" litex-hub75 \
+    "./colorlight.py --revision 8.2 --ip-address 10.11.6.250 --build"
 ```
 
-### Hardware
+### 2. Program the FPGA
+
+```bash
+# Using USB Blaster (Altera) programmer:
+docker run --rm \
+    -v "$(pwd):/project" \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --privileged \
+    litex-hub75 \
+    "openFPGALoader --cable usb-blaster /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
+```
+
+### 3. Test Network
+
+```bash
+# Clear any stale ARP entries
+sudo arp -d 10.11.6.250 2>/dev/null
+
+# Test ping
+ping 10.11.6.250
+
+# Expected: 0% packet loss, ~0.3ms latency
+```
+
+### 4. Test Etherbone (CSR Access)
+
+```bash
+docker run --rm --network host -v "$(pwd):/project" litex-hub75 \
+    "litex_server --udp --udp-ip 10.11.6.250 &
+     sleep 2
+     litex_cli --csr-csv /project/build/colorlight_5a_75e/csr.csv --regs | head -20"
+```
+
+---
+
+## Hardware Requirements
 
 | Component | Description |
 |-----------|-------------|
-| Colorlight 5A-75E V8.2 | FPGA-based LED receiver card (Lattice ECP5-25F) |
-| Altera USB Blaster | JTAG programmer for flashing firmware |
-| 5V Power Supply | Powers the Colorlight board (2A recommended) |
-| HUB75 LED Panel | 64x64 or 64x32 RGB LED matrix |
-| Ethernet Cable | Connects PC to Colorlight (Gigabit required) |
+| **Colorlight 5A-75E V8.2** | FPGA board with Lattice ECP5-25F |
+| **Altera USB Blaster** | JTAG programmer (09fb:6001) |
+| **5V Power Supply** | Powers the board (2A minimum) |
+| **HUB75 LED Panel** | 64x64 RGB panel (1/32 scan, ABCDE addressing) |
+| **Ethernet Cable** | Gigabit connection to your PC |
 
-## Helper Scripts
+### V8.2 Specifications
 
-| Script | Purpose |
-|--------|---------|
-| `./setup.sh` | Install dependencies, setup Python venv, build Docker image |
-| `./docker_build.sh` | Build firmware inside Docker container |
-| `./flash.sh` | Flash firmware to the board |
-| `./network_setup.sh` | Configure PC network for board communication |
+- **FPGA:** Lattice LFE5U-25F-7BG256I
+- **Ethernet PHY:** Broadcom B50612D (not RTL8211!)
+- **Clock:** 25MHz oscillator
+- **SDRAM:** 4MB
 
-### Building Firmware
+---
 
-```bash
-# Build Docker image (automatic on first use)
-./docker_build.sh build-image
+## JTAG Wiring (USB Blaster to Colorlight)
 
-# Build LED blink test (verify JTAG works)
-./docker_build.sh blink
-
-# Build HUB75 panel test (verify panel wiring)
-./docker_build.sh hub75
-
-# Build full network firmware
-./docker_build.sh firmware
-
-# Interactive shell in container (for debugging)
-./docker_build.sh shell
-```
-
-### Flashing Firmware
-
-```bash
-# Detect FPGA (verify JTAG connection)
-./flash.sh --detect
-
-# Flash network firmware (default)
-./flash.sh
-
-# Flash specific firmware
-./flash.sh blink
-./flash.sh hub75
-./flash.sh network
-
-# Flash to SPI (persistent, survives power cycle)
-./flash.sh --permanent
-./flash.sh network --permanent
-```
-
-### Network Setup
-
-```bash
-# Configure network interface
-./network_setup.sh
-
-# Use specific interface
-./network_setup.sh eth0
-
-# Check status
-./network_setup.sh --status
-
-# Remove configuration
-./network_setup.sh --reset
-```
-
-## Hardware Setup
-
-### JTAG Wiring (USB Blaster to Colorlight 5A-75E)
-
-The JTAG pads are located near the ECP5 FPGA chip on the board.
+The JTAG pads are near the ECP5 chip:
 
 | Colorlight Pad | Signal | USB Blaster Pin |
 |----------------|--------|-----------------|
@@ -153,271 +92,220 @@ The JTAG pads are located near the ECP5 FPGA chip on the board.
 | J32 | TDI | 9 |
 | J31 | TMS | 5 |
 | J27 | TCK | 1 |
-| J33 | 3V3 | 7 (optional, can use board power) |
+| J33 | 3V3 | 7 (optional) |
 | J34 | GND | 2, 10 |
 
-### HUB75 Panel Connection
-
-Connect your LED panel to the **J1** connector. The firmware currently supports one 64x64 panel.
-
-HUB75 signals on J1:
-- R0, G0, B0: Upper half RGB data
-- R1, G1, B1: Lower half RGB data
-- A, B, C, D, E: Row address (E for 1/32 scan panels)
-- CLK: Pixel clock
-- LAT: Latch signal
-- OE: Output enable
+---
 
 ## Network Configuration
 
-| Setting | Value |
-|---------|-------|
-| Board IP | 192.168.178.50 |
-| Host IP | 192.168.178.100 (configured by network_setup.sh) |
-| UDP Port | 6000 |
-| Protocol | UDP, 5 bytes per pixel |
+### Default Settings (hub75_sawatzke)
 
-### Pixel Protocol
+| Parameter | Value |
+|-----------|-------|
+| Board IP | Set via `--ip-address` (e.g., 10.11.6.250) |
+| Etherbone MAC | 10:e2:d5:00:00:00 |
+| Etherbone Port | 1234 (UDP) |
 
-Each UDP packet contains pixel data:
+**Note:** Telnet is not currently working. The `with_ethmac=True` option (needed for CPU network access) breaks ARP. This requires further debugging.
+
+### Changing IP Address
+
+Edit the build command:
+```bash
+docker run --rm -v "$(pwd):/project" litex-hub75 \
+    "./colorlight.py --revision 8.2 --ip-address YOUR.IP.HERE --build"
+```
+
+---
+
+## hub75_sawatzke Project Details
+
+### Architecture
 
 ```
-Byte 0: Y coordinate (0-63)
-Byte 1: X coordinate (0-63)
-Byte 2: Red (0-63, 6-bit)
-Byte 3: Green (0-63, 6-bit)
-Byte 4: Blue (0-63, 6-bit)
+┌─────────────────────────────────────────────────────────────┐
+│                     LiteX SoC (40MHz)                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐ │
+│  │ VexRiscv │  │  SDRAM   │  │  SPI     │  │   HUB75     │ │
+│  │   CPU    │  │  4MB     │  │  Flash   │  │   Driver    │ │
+│  └──────────┘  └──────────┘  └──────────┘  └─────────────┘ │
+│        │              │             │              │        │
+│        └──────────────┼─────────────┼──────────────┘        │
+│                       │             │                        │
+│              ┌────────┴─────────────┴────────┐              │
+│              │      Wishbone Bus             │              │
+│              └───────────────────────────────┘              │
+│                           │                                  │
+│              ┌────────────┴────────────┐                    │
+│              │   LiteEth UDP/IP Stack  │                    │
+│              │   - ICMP (ping)         │                    │
+│              │   - Etherbone           │                    │
+│              │   - EthMAC (optional)   │                    │
+│              └────────────┬────────────┘                    │
+│                           │                                  │
+│              ┌────────────┴────────────┐                    │
+│              │  RGMII PHY (B50612D)    │                    │
+│              │  tx_delay=0, rx_delay=2ns│                    │
+│              └─────────────────────────┘                    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Testing Sequence
+### Key Files
 
-Follow this sequence to verify each component works:
+| File | Purpose |
+|------|---------|
+| `colorlight.py` | Main LiteX SoC definition |
+| `hub75.py` | HUB75 panel driver module |
+| `helper.py` | Pin definitions for HUB75 connectors |
+| `Dockerfile` | Build environment with LiteX toolchain |
+| `build/colorlight_5a_75e/` | Build outputs (bitstream, CSR files) |
 
-### 1. Blink Test (verify JTAG)
+### Memory Map
+
+| Region | Address | Size | Description |
+|--------|---------|------|-------------|
+| ROM | 0x00000000 | 64KB | Boot ROM |
+| SRAM | 0x10000000 | 8KB | Fast internal RAM |
+| Main RAM | 0x40000000 | 4MB | SDRAM |
+| SPI Flash | 0x80200000 | 2MB | External flash |
+| EthMAC RX | 0x80000000 | 4KB | Ethernet RX buffers |
+| EthMAC TX | 0x80001000 | 4KB | Ethernet TX buffers |
+| Uncached RAM | 0x90000000 | 4MB | SDRAM (uncached mirror) |
+| CSR | 0xF0000000 | 64KB | Control/Status registers |
+
+### Building from Source
 
 ```bash
-./docker_build.sh blink
-./flash.sh blink
+cd hub75_sawatzke
+
+# Full build with custom IP
+docker run --rm -v "$(pwd):/project" litex-hub75 \
+    "./colorlight.py --revision 8.2 --ip-address 10.11.6.250 --build"
+
+# Build outputs:
+#   build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit  (bitstream)
+#   build/colorlight_5a_75e/gateware/colorlight_5a_75e.svf  (SVF format)
+#   build/colorlight_5a_75e/csr.csv                        (register map)
+#   sw_rust/litex-pac/colorlight.svd                       (SVD for Rust)
 ```
 
-**Success:** Onboard LED blinks at ~1Hz
+---
 
-### 2. HUB75 Test (verify panel wiring)
+## Programming Methods
+
+### Method 1: openFPGALoader with USB Blaster (Recommended)
 
 ```bash
-./docker_build.sh hub75
-./flash.sh hub75
+# Detect FPGA
+docker run --rm -v /dev/bus/usb:/dev/bus/usb --privileged litex-hub75 \
+    "openFPGALoader --cable usb-blaster --detect"
+
+# Program SRAM (temporary, lost on power cycle)
+docker run --rm \
+    -v "$(pwd):/project" \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --privileged \
+    litex-hub75 \
+    "openFPGALoader --cable usb-blaster /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
+
+# Program SPI Flash (permanent)
+docker run --rm \
+    -v "$(pwd):/project" \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --privileged \
+    litex-hub75 \
+    "openFPGALoader --cable usb-blaster -f /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
 ```
 
-**Success:** Color bars appear on panel
+### Method 2: ecpprog with FTDI Programmer
 
-### 3. Network Test (full functionality)
+If you have an FTDI-based programmer (not USB Blaster):
 
 ```bash
-./docker_build.sh firmware
-./flash.sh
-./network_setup.sh
-source venv/bin/activate
-python python/examples/test_connection.py
+docker run --rm \
+    -v "$(pwd):/project" \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --privileged \
+    litex-hub75 \
+    "ecpprog -S /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
 ```
 
-**Success:** Patterns appear on panel
-
-## Python Library
-
-### Setup
-
-```bash
-source venv/bin/activate  # Created by setup.sh
-```
-
-### Basic Usage
-
-```python
-from colorlight import ColorlightDisplay
-
-# Create display (uses default IP 192.168.178.50, port 6000)
-display = ColorlightDisplay()
-
-# Set individual pixels (6-bit color: 0-63)
-display.set_pixel(10, 10, 63, 0, 0)   # Red pixel
-display.set_pixel(20, 20, 0, 63, 0)   # Green pixel
-display.set_pixel(30, 30, 0, 0, 63)   # Blue pixel
-
-# Fill entire display
-display.fill(63, 63, 63)  # White
-
-# Clear display
-display.clear()
-
-display.close()
-```
-
-### Using 8-bit Colors
-
-The library automatically converts 8-bit (0-255) to 6-bit (0-63):
-
-```python
-# These are equivalent:
-display.set_pixel(0, 0, 255, 128, 0)  # 8-bit values
-display.set_pixel(0, 0, 63, 32, 0)    # 6-bit values
-```
-
-### Frame Buffer with NumPy
-
-```python
-from colorlight import ColorlightFrameBuffer
-from PIL import Image
-import numpy as np
-
-# Create frame buffer
-fb = ColorlightFrameBuffer()
-
-# Load and display an image
-fb.load_image("artwork.png")
-fb.send()
-
-# Or work with numpy arrays directly
-fb.buffer = np.zeros((64, 64, 3), dtype=np.uint8)
-fb.buffer[32, 32] = [255, 0, 0]  # Red pixel at center
-fb.send()
-```
-
-### Example Scripts
-
-```bash
-source venv/bin/activate
-
-# Test connection with patterns
-python python/examples/test_connection.py
-
-# Animated plasma effect
-python python/examples/plasma.py
-
-# Display an image
-python python/examples/show_image.py /path/to/image.png
-python python/examples/show_image.py image.jpg --loop --interval 0.5
-```
-
-## Project Structure
-
-```
-colorlight/
-├── README.md                 # This file
-├── Dockerfile                # FPGA toolchain container
-├── docker_build.sh           # Build firmware in Docker
-├── flash.sh                  # Flash firmware to board
-├── setup.sh                  # Initial setup script
-├── network_setup.sh          # Configure network interface
-├── requirements.txt          # Python dependencies
-├── venv/                     # Python virtual environment
-│
-├── firmware/
-│   ├── build/                # Build outputs
-│   │   ├── blink_test/       # blink_test.bit
-│   │   ├── hub75_test/       # hub75_test.bit
-│   │   └── network/          # top.bit, top.svf
-│   ├── src/                  # Test firmware sources
-│   ├── constraints/          # Pin mapping files
-│   └── colorlight-led-cube/  # Network firmware source
-│
-├── python/
-│   ├── colorlight.py         # Main display driver library
-│   └── examples/             # Example scripts
-│
-└── docs/
-    └── chubby75/             # Hardware pinout documentation
-```
-
-## Changing the IP Address
-
-The IP address is hardcoded in the firmware. To change it:
-
-1. Edit `firmware/colorlight-led-cube/fpga/liteeth_core.v`
-2. Search for IP address bytes (192.168.178.50 = 0xC0, 0xA8, 0xB2, 0x32)
-3. Rebuild: `./docker_build.sh firmware`
-4. Reflash: `./flash.sh`
-
-Also update the Python library default in `python/colorlight.py`.
+---
 
 ## Troubleshooting
 
-### JTAG Not Detected
+### Ping Doesn't Work
+
+1. **Check programmer is connected:** `lsusb | grep -i "altera\|ftdi"`
+2. **Reload bitstream** (SRAM is lost on power cycle)
+3. **Clear stale ARP:** `sudo arp -d <board-ip>`
+4. **Verify network interface:** `ip addr show` - must be on same subnet
+5. **Check ARP table:** `arp -a | grep <board-ip>` - should show board MAC
+
+### FPGA Not Detected
 
 ```bash
 # Check USB device
-lsusb | grep -i altera
+lsusb | grep -i "altera\|09fb"
 
-# Detect with flash.sh
-./flash.sh --detect
+# Expected: Bus 001 Device 006: ID 09fb:6001 Altera Blaster
+
+# Try detect with openFPGALoader
+docker run --rm -v /dev/bus/usb:/dev/bus/usb --privileged litex-hub75 \
+    "openFPGALoader --cable usb-blaster --detect"
 ```
 
-- Verify wiring connections (see JTAG table above)
-- Ensure 5V power is connected to Colorlight
-- Check that USB Blaster LED is on
-- Run `./setup.sh` to install udev rules
+### Build Fails with Memory Overlap
 
-### No Display Output
+If you see "Region overlap between spiflash and ethmac":
+- This is fixed in current code - spiflash is at 0x80200000
+- If using old code, set spiflash origin to 0x80200000 (2MB aligned)
 
-- Run blink test first to verify JTAG works
-- Check HUB75 ribbon cable orientation (pin 1 marker)
-- Verify panel power (often needs separate 5V supply)
-- Run hub75 test to verify wiring
+### Timing Fails
 
-### No Network Response
+- Ensure `--revision 8.2` matches your board
+- System runs at 40MHz (passes timing)
+- If using 125MHz, expect failures (~58MHz achievable)
 
-```bash
-# Check network status
-./network_setup.sh --status
+---
+
+## Original colorlight-led-cube Project
+
+Located in `firmware/colorlight-led-cube/`. This is a simpler Verilog-only project but has timing issues at 125MHz.
+
+**Status:** Not recommended - use hub75_sawatzke instead.
+
+---
+
+## Directory Structure
+
+```
+colorlight/
+├── README.md                    # This file
+├── hub75_sawatzke/              # RECOMMENDED PROJECT
+│   ├── colorlight.py            # LiteX SoC definition
+│   ├── hub75.py                 # HUB75 driver
+│   ├── Dockerfile               # Build environment
+│   ├── docker_build.sh          # Build script
+│   └── build/                   # Build outputs
+│
+├── firmware/                    # Original project (timing issues)
+│   └── colorlight-led-cube/     # Verilog sources
+│
+├── litex/                       # LiteX framework
+├── liteeth/                     # Ethernet stack
+├── litedram/                    # SDRAM controller
+├── migen/                       # HDL generator
+└── [other litex deps]/          # Various LiteX dependencies
 ```
 
-- Verify both devices on same subnet (192.168.178.x)
-- Check Ethernet cable (use port near power connector on board)
-- Board requires Gigabit Ethernet (no 10/100 fallback)
-- Use Wireshark to verify packets are being sent
-- Make sure network firmware is flashed (not blink/hub75 test)
-
-### Docker Build Fails
-
-```bash
-# Check Docker is running
-docker info
-
-# Rebuild image from scratch
-./docker_build.sh build-image
-
-# Debug interactively
-./docker_build.sh shell
-```
-
-## Technical Details
-
-### FPGA
-
-- **Chip**: Lattice ECP5-25F (LFE5U-25F-6BG256C)
-- **Package**: 256-ball BGA
-- **Logic Cells**: ~24K LUTs
-- **Block RAM**: 56 x 18Kb = 1008Kb
-
-### Clocks
-
-- 25MHz oscillator on board
-- PLL generates:
-  - 125MHz system clock
-  - 52MHz panel clock
-
-### Ethernet
-
-- RTL8211FD Gigabit PHY
-- RGMII interface
-- LiteEth UDP/IP stack
-- 1000Mbps only
+---
 
 ## References
 
-- [chubby75](https://github.com/q3k/chubby75) - Hardware reverse engineering and pinouts
-- [colorlight-led-cube](https://github.com/lucysrausch/colorlight-led-cube) - Base firmware project
-- [LiteX](https://github.com/enjoy-digital/litex) - SoC builder framework
-- [Project Trellis](https://github.com/YosysHQ/prjtrellis) - ECP5 bitstream documentation
-- [Yosys](https://github.com/YosysHQ/yosys) - Open source synthesis
-- [nextpnr](https://github.com/YosysHQ/nextpnr) - Open source place and route
+- [hub75_colorlight75_stuff](https://github.com/david-sawatzke/hub75_colorlight75_stuff) - Original project by David Sawatzke
+- [colorlight-led-cube](https://github.com/lucysrausch/colorlight-led-cube) - Original Verilog project
+- [chubby75](https://github.com/q3k/chubby75) - Hardware reverse engineering
+- [LiteX](https://github.com/enjoy-digital/litex) - SoC builder
+- [openFPGALoader](https://github.com/trabucayre/openFPGALoader) - FPGA programming tool

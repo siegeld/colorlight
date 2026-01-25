@@ -1,9 +1,29 @@
 # Build outputs
 firmware/build/
+hub75_sawatzke/build/
+build_*/
 *.bit
 *.svf
 *.json
 *.config
+
+# LiteX dependencies (install via litex_setup.py, not git)
+litex/
+liteeth/
+litedram/
+litespi/
+litescope/
+litepcie/
+litesata/
+litesdcard/
+liteiclink/
+litejesd204b/
+litei2c/
+litex-boards/
+migen/
+pythondata-*/
+valentyusb/
+colorlite/
 
 # Python
 venv/
