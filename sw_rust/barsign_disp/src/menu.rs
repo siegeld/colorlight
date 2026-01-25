@@ -40,6 +40,7 @@ pub struct Context {
     pub flash: Flash,
     pub ip_mac: IpMacData,
     pub animation: Animation,
+    pub quit: bool,
 }
 
 impl Context {
@@ -67,6 +68,14 @@ impl core::fmt::Write for Context {
 pub const ROOT_MENU: Menu<Context> = Menu {
     label: "root",
     items: &[
+        &Item {
+            item_type: ItemType::Callback {
+                function: quit,
+                parameters: &[],
+            },
+            command: "quit",
+            help: Some("Close the telnet connection"),
+        },
         &Item {
             item_type: ItemType::Callback {
                 function: reboot,
@@ -219,6 +228,10 @@ pub const ROOT_MENU: Menu<Context> = Menu {
     entry: None,
     exit: None,
 };
+
+fn quit(_menu: &Menu<Context>, _item: &Item<Context>, _args: &[&str], context: &mut Context) {
+    context.quit = true;
+}
 
 fn reboot(_menu: &Menu<Context>, _item: &Item<Context>, _args: &[&str], _context: &mut Context) {
     // Safe, because the soc is reset *now*

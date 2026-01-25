@@ -123,6 +123,7 @@ fn main() -> ! {
         hub75,
         flash,
         animation: menu::Animation::None,
+        quit: false,
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
@@ -132,6 +133,9 @@ fn main() -> ! {
     let mut time_ms: i64 = 0;
     let mut telnet_active = false;
     let mut loop_counter: u32 = 0;
+    // Telnet IAC parser state: 0=normal, 1=got IAC(0xFF), 2=got cmd(WILL/WONT/DO/DONT),
+    // 3=in subnegotiation, 4=got IAC inside subnegotiation
+    let mut iac_state: u8 = 0;
 
     loop {
         // Use real timing: poll every 1ms
@@ -160,6 +164,7 @@ fn main() -> ! {
                 writeln!(r.context.output.serial, "Couldn't listen to telnet port").ok();
             }
             if !telnet_active && socket.is_active() {
+                iac_state = 0;
                 r.context.output.out_data.clear();
                 r.context
                     .output
@@ -167,7 +172,7 @@ fn main() -> ! {
                     .extend_from_slice(
                         // Taken from https://stackoverflow.com/a/4532395
                         // Does magic telnet stuff to behave more like a dumb serial terminal
-                        b"\xFF\xFD\x22\xFF\xFA\x22\x01\x00\xFF\xF0\xFF\xFB\x01\r\nWelcome to the menu. Use \"help\" for help\r\n",
+                        b"\xFF\xFD\x22\xFF\xFA\x22\x01\x00\xFF\xF0\xFF\xFB\x01\r\nWelcome to the menu. Use \"help\" for help\r\n> ",
                     )
                     .expect("Should always work");
             }
@@ -184,15 +189,54 @@ fn main() -> ! {
                     };
 
                     for byte in &buffer[..received] {
-                        if *byte != 0 {
-                            r.input_byte(*byte);
+                        let b = *byte;
+                        match iac_state {
+                            0 => {
+                                if b == 0xFF {
+                                    iac_state = 1; // IAC
+                                } else if b != 0 {
+                                    r.input_byte(b);
+                                }
+                            }
+                            1 => match b {
+                                // WILL, WONT, DO, DONT: expect one option byte
+                                0xFB | 0xFC | 0xFD | 0xFE => iac_state = 2,
+                                // SB: subnegotiation start
+                                0xFA => iac_state = 3,
+                                // Anything else (including doubled 0xFF): done
+                                _ => iac_state = 0,
+                            },
+                            2 => {
+                                // Option byte consumed, back to normal
+                                iac_state = 0;
+                            }
+                            3 => {
+                                // In subnegotiation, wait for IAC
+                                if b == 0xFF {
+                                    iac_state = 4;
+                                }
+                            }
+                            4 => {
+                                // IAC inside subneg: SE(0xF0) ends it
+                                if b == 0xF0 {
+                                    iac_state = 0;
+                                } else {
+                                    iac_state = 3;
+                                }
+                            }
+                            _ => iac_state = 0,
                         }
-                        // r.input_byte(if data == b'\n' { b'\r' } else { data });
                     }
 
                     // socket.send_slice(core::slice::from_ref(&data)).unwrap();
                 }
             } else if socket.can_send() {
+                socket.close();
+            }
+
+            // Handle quit command
+            if r.context.quit {
+                r.context.quit = false;
                 socket.close();
             }
 
