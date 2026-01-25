@@ -9,7 +9,8 @@
 | Bitstream | Working | 40MHz, passes timing |
 | Firmware | Working | Rust, smoltcp TCP/IP |
 | Ping | Working | Via smoltcp ICMP |
-| Telnet | Working | Port 23, via TFTP boot |
+| Telnet | Working | Port 23, IAC filtering, quit command |
+| Animation | Working | 30fps double-buffered via fb_base CSR |
 | Flash Boot | **Broken** | Needs flash chip update for rev 8.2 |
 | Art-Net | Partial | Palette works, pixels disabled |
 
@@ -55,9 +56,12 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | File | Purpose |
 |------|---------|
 | `colorlight.py` | LiteX SoC definition, peripheral instantiation |
-| `hub75.py` | HUB75 display driver gateware |
+| `hub75.py` | HUB75 display driver gateware (includes `fb_base` CSR) |
 | `smoleth.py` | Custom ethernet module (currently unused, kept for reference) |
-| `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, network loop |
+| `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, network loop, telnet IAC parser |
+| `sw_rust/barsign_disp/src/hub75.rs` | HUB75 driver: double-buffered framebuffer, swap_buffers() |
+| `sw_rust/barsign_disp/src/menu.rs` | Telnet CLI commands (pattern, quit, animation) |
+| `sw_rust/barsign_disp/src/patterns.rs` | Test pattern generators (grid, rainbow, animated_rainbow) |
 | `sw_rust/barsign_disp/src/ethernet.rs` | smoltcp device driver |
 | `sw_rust/litex-pac/` | Generated peripheral access crate |
 
@@ -102,6 +106,33 @@ docker run --rm -v "$(pwd):/project" -v /dev/bus/usb:/dev/bus/usb --privileged \
 | SPI Flash | 0x80200000 | 2MB | Memory-mapped flash |
 | Flash Boot | 0x80300000 | - | Firmware load address |
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
+
+## HUB75 Double Buffering
+
+The HUB75 gateware has a `fb_base` CSR register (20-bit, at `HUB75 + 0x04`) that controls which SDRAM region the DMA reads from. The firmware splits the SDRAM framebuffer area into two 256KB halves:
+
+- **Buffer 0**: SDRAM word offset `0x80000` (byte addr `0x90200000`)
+- **Buffer 1**: SDRAM word offset `0x90000` (byte addr `0x90240000`)
+
+The CPU always writes to the **back buffer** via `write_img_data()`, then calls `swap_buffers()` which swaps the slice references and writes the new front buffer address to `fb_base`. This eliminates tearing from CPU/DMA contention.
+
+### Animation Framework
+
+Animation state is stored in `Context.animation` (enum: `None`, `Rainbow { phase }`). The main loop calls `animation_tick()` every 33ms (~30fps). Each tick writes a new frame to the back buffer and swaps.
+
+Available animated patterns: `rainbow_anim` (via telnet `pattern` command).
+
+## Telnet IAC Handling
+
+The telnet input path in `main.rs` includes a state machine that strips IAC (Interpret As Command) sequences from the byte stream before feeding characters to the menu parser. States:
+
+- **0**: Normal - pass bytes through, enter state 1 on `0xFF`
+- **1**: Got IAC - dispatch on command byte (WILL/WONT/DO/DONT → state 2, SB → state 3)
+- **2**: Got command - consume option byte, return to state 0
+- **3**: In subnegotiation - skip until `0xFF`
+- **4**: IAC inside subneg - `0xF0` (SE) ends it, return to state 0
+
+Without this parser, telnet option bytes (e.g. `0x22` = `"`) leak through as spurious menu input.
 
 ## Known Issues & Solutions
 

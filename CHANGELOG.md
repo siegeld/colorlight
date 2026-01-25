@@ -14,6 +14,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.3] - 2026-01-25
+
+### Added
+- **Telnet IAC filtering** - State machine parser strips telnet negotiation sequences from input, preventing binary option bytes from corrupting the menu
+- **`quit` command** - Closes the telnet connection cleanly
+- **Prompt on connect** - Welcome message now includes `> ` prompt so users can type immediately
+
+---
+
+## [0.2.2] - 2026-01-25
+
+### Added
+- **Framebuffer double buffering** - New `fb_base` CSR register in HUB75 gateware allows software-controlled framebuffer base address
+  - Two 256KB framebuffer regions in SDRAM (front and back)
+  - CPU writes to back buffer, then flips `fb_base` to swap atomically
+  - Eliminates tearing from CPU/DMA contention during animation
+- `swap_buffers()` method on Hub75 driver
+
+### Changed
+- Animation tick restored to 30fps (33ms) now that double buffering prevents tearing
+- All image-writing paths (patterns, default image, SPI image) now use write-then-swap
+
+---
+
+## [0.2.1] - 2026-01-25
+
+### Added
+- **Animated rainbow pattern** - `pattern rainbow_anim` telnet command displays a smoothly scrolling diagonal rainbow
+- `Animation` enum in Context for tracking active animation state
+- `animated_rainbow()` pattern generator with phase offset
+- `animation_tick()` method called from main loop
+
+---
+
 ## [0.2.0] - 2026-01-25
 
 ### Added
@@ -73,6 +107,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.3 | 2026-01-25 | Telnet IAC filtering and quit command |
+| 0.2.2 | 2026-01-25 | Framebuffer double buffering via fb_base CSR |
+| 0.2.1 | 2026-01-25 | Animated rainbow pattern |
 | 0.2.0 | 2026-01-25 | General-purpose panel configuration |
 | 0.1.0 | 2025-01-25 | Initial release with telnet support |
 
