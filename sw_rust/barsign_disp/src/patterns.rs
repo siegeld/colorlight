@@ -98,6 +98,20 @@ pub fn rainbow(width: u16, height: u16) -> impl Iterator<Item = u32> {
     })
 }
 
+/// Generate animated rainbow diagonal wave pattern with phase offset
+pub fn animated_rainbow(width: u16, height: u16, phase: u32) -> impl Iterator<Item = u32> {
+    let w = width as u32;
+    let h = height as u32;
+
+    (0..h).flat_map(move |row| {
+        (0..w).map(move |col| {
+            let hue = ((col + row).wrapping_add(phase)) * 360 * 2 / (w + h) % 360;
+            let (r, g, b) = hsv_to_rgb(hue as u16, 255, 255);
+            rgb(r, g, b)
+        })
+    })
+}
+
 /// Generate solid color pattern
 pub fn solid(width: u16, height: u16, r: u8, g: u8, b: u8) -> impl Iterator<Item = u32> {
     let total = (width as usize) * (height as usize);

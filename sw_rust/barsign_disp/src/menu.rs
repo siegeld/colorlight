@@ -29,11 +29,32 @@ impl core::fmt::Write for Output {
     }
 }
 
+pub enum Animation {
+    None,
+    Rainbow { phase: u32 },
+}
+
 pub struct Context {
     pub output: Output,
     pub hub75: Hub75,
     pub flash: Flash,
     pub ip_mac: IpMacData,
+    pub animation: Animation,
+}
+
+impl Context {
+    pub fn animation_tick(&mut self) {
+        match self.animation {
+            Animation::None => {}
+            Animation::Rainbow { ref mut phase } => {
+                *phase = phase.wrapping_add(1);
+                let (w, len) = self.hub75.get_img_param();
+                let h = if w > 0 { (len / w as u32) as u16 } else { return };
+                if h == 0 { return; }
+                self.hub75.write_img_data(0, crate::patterns::animated_rainbow(w, h, *phase));
+            }
+        }
+    }
 }
 
 impl core::fmt::Write for Context {
@@ -186,7 +207,7 @@ pub const ROOT_MENU: Menu<Context> = Menu {
                 parameters: &[
                     Parameter::Mandatory {
                         parameter_name: "name",
-                        help: Some("grid, rainbow, white, red, green, blue"),
+                        help: Some("grid, rainbow, rainbow_anim, white, red, green, blue"),
                     },
                 ],
             },
@@ -408,30 +429,41 @@ fn pattern(
         "grid" => {
             hub75.set_img_param(w, total);
             hub75.write_img_data(0, patterns::grid(w, h));
+            context.animation = Animation::None;
         }
         "rainbow" => {
             hub75.set_img_param(w, total);
             hub75.write_img_data(0, patterns::rainbow(w, h));
+            context.animation = Animation::None;
+        }
+        "rainbow_anim" => {
+            hub75.set_img_param(w, total);
+            hub75.write_img_data(0, patterns::animated_rainbow(w, h, 0));
+            context.animation = Animation::Rainbow { phase: 0 };
         }
         "white" => {
             hub75.set_img_param(w, total);
             hub75.write_img_data(0, patterns::solid_white(w, h));
+            context.animation = Animation::None;
         }
         "red" => {
             hub75.set_img_param(w, total);
             hub75.write_img_data(0, patterns::solid_red(w, h));
+            context.animation = Animation::None;
         }
         "green" => {
             hub75.set_img_param(w, total);
             hub75.write_img_data(0, patterns::solid_green(w, h));
+            context.animation = Animation::None;
         }
         "blue" => {
             hub75.set_img_param(w, total);
             hub75.write_img_data(0, patterns::solid_blue(w, h));
+            context.animation = Animation::None;
         }
         _ => {
             writeln!(context.output, "Unknown pattern: {}", name).unwrap();
-            writeln!(context.output, "Available: grid, rainbow, white, red, green, blue").unwrap();
+            writeln!(context.output, "Available: grid, rainbow, rainbow_anim, white, red, green, blue").unwrap();
             return;
         }
     }

@@ -120,6 +120,7 @@ fn main() -> ! {
         output,
         hub75,
         flash,
+        animation: menu::Animation::None,
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
@@ -143,10 +144,12 @@ fn main() -> ! {
         }
 
         iface.poll(time).ok();
-        // match iface.poll(time) {
-        //     Ok(_) => {}
-        //     Err(_) => {}
-        // }
+
+        // Update animation at ~10fps (every 100ms) — slow enough that
+        // the full-frame SDRAM rewrite isn't visible as a scan line
+        if time_ms % 100 == 0 {
+            r.context.animation_tick();
+        }
 
         // tcp:23: telnet for menu
         {
