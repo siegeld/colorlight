@@ -57,10 +57,28 @@ def rainbow(width, height):
     return bytes(data)
 
 
+def heart(width, height):
+    """Filled red heart on black background."""
+    data = bytearray()
+    for y in range(height):
+        # Map to math coords: x in [-1.3, 1.3], y in [-1.2, 1.9] (top=1.9)
+        ny = 1.9 - 3.1 * y / (height - 1)
+        for x in range(width):
+            nx = 2.6 * x / (width - 1) - 1.3
+            # Implicit heart: (x^2 + y^2 - 1)^3 - x^2 * y^3 <= 0
+            v = (nx * nx + ny * ny - 1.0) ** 3 - nx * nx * ny * ny * ny
+            if v <= 0:
+                data.extend([255, 0, 0])
+            else:
+                data.extend([0, 0, 0])
+    return bytes(data)
+
+
 PATTERNS = {
     "gradient": gradient,
     "bars": color_bars,
     "rainbow": rainbow,
+    "heart": heart,
 }
 
 
