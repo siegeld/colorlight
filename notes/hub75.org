@@ -1,0 +1,20 @@
+#+TITLE: Hub75
+
+
+* Planned new hub75 driver
+Add a double buffering sheme, so that data for the next line is read from sram, while the last one is being shifted out.
+Read data from sdram into buffers (do palette lookup & maybe gamma correction at the same time).
+This is done with 6 memory units, each 512 elements deep and 32 bits wide. (*2, for double buffering).
+
+Each one is either assigned to the r, g or b channel. A collection of 3 memory
+units can supply 4 pipelines at once, so in total each pipeline handles one
+output, with both the top & bottom half. This means, we can shift a bit out every two cycles, without delay.
+
+In total, this means 12 of 56 sysMEM blocks
+
+The total panelcount is thus 8 * 4 -> 32, so 65536 (or 2^16) pixels.
+This means (if one pixel has 32 bits) 192k sdram usage for full color image or
+64k for a indexed image (exkl. palette, adds 1k).
+* Plan for restructuring
+1. Add a mem buffer in between reading from ram & writing it out
+2. Only save it during the first bit

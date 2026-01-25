@@ -1,96 +1,65 @@
-# Dockerfile for Colorlight 5A-75E FPGA build environment
-# Builds yosys, nextpnr-ecp5, prjtrellis from source
-
-FROM debian:bookworm-slim
+# LiteX build environment for hub75_colorlight75_stuff
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install build dependencies
+# Install base dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
-    clang \
-    bison \
-    flex \
-    libreadline-dev \
-    gawk \
-    tcl-dev \
-    libffi-dev \
     git \
-    graphviz \
-    xdot \
-    pkg-config \
+    wget \
+    curl \
     python3 \
     python3-pip \
     python3-venv \
-    libboost-system-dev \
-    libboost-python-dev \
-    libboost-filesystem-dev \
-    libboost-thread-dev \
-    libboost-program-options-dev \
-    libboost-iostreams-dev \
-    libboost-dev \
-    libeigen3-dev \
-    cmake \
+    libevent-dev \
+    libjson-c-dev \
+    autoconf \
+    flex \
+    bison \
     libftdi1-dev \
     libusb-1.0-0-dev \
-    libhidapi-dev \
-    zlib1g-dev \
-    wget \
-    ca-certificates \
+    pkg-config \
+    cmake \
+    libboost-all-dev \
+    libeigen3-dev \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Build Yosys
-RUN git clone --depth 1 --branch yosys-0.40 https://github.com/YosysHQ/yosys.git /tmp/yosys \
-    && cd /tmp/yosys \
-    && make config-clang \
-    && make -j$(nproc) \
-    && make install \
-    && rm -rf /tmp/yosys
+# Install OSS CAD Suite (includes yosys, nextpnr-ecp5, prjtrellis, ecpprog)
+RUN cd /opt && \
+    wget -q https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2024-02-14/oss-cad-suite-linux-x64-20240214.tgz && \
+    tar -xzf oss-cad-suite-linux-x64-20240214.tgz && \
+    rm oss-cad-suite-linux-x64-20240214.tgz
 
-# Build prjtrellis (needed for nextpnr-ecp5)
-RUN git clone --recursive --depth 1 https://github.com/YosysHQ/prjtrellis.git /tmp/prjtrellis \
-    && cd /tmp/prjtrellis/libtrellis \
-    && cmake -DCMAKE_INSTALL_PREFIX=/usr/local . \
-    && make -j$(nproc) \
-    && make install \
-    && rm -rf /tmp/prjtrellis
+ENV PATH="/opt/oss-cad-suite/bin:${PATH}"
 
-# Build nextpnr-ecp5
-RUN git clone --depth 1 https://github.com/YosysHQ/nextpnr.git /tmp/nextpnr \
-    && cd /tmp/nextpnr \
-    && cmake -DARCH=ecp5 -DTRELLIS_INSTALL_PREFIX=/usr/local -DCMAKE_INSTALL_PREFIX=/usr/local -B build \
-    && cmake --build build -j$(nproc) \
-    && cmake --install build \
-    && rm -rf /tmp/nextpnr
+# Install RISC-V toolchain from xPack (has proper prefixes)
+RUN mkdir -p /opt/xpack-riscv && \
+    cd /tmp && \
+    wget -q https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v13.2.0-2/xpack-riscv-none-elf-gcc-13.2.0-2-linux-x64.tar.gz && \
+    tar -xzf xpack-riscv-none-elf-gcc-13.2.0-2-linux-x64.tar.gz -C /opt/xpack-riscv --strip-components=1 && \
+    rm xpack-riscv-none-elf-gcc-13.2.0-2-linux-x64.tar.gz
 
-# Build openFPGALoader
-RUN git clone --depth 1 https://github.com/trabucayre/openFPGALoader.git /tmp/openFPGALoader \
-    && cd /tmp/openFPGALoader \
-    && mkdir build && cd build \
-    && cmake .. \
-    && make -j$(nproc) \
-    && make install \
-    && rm -rf /tmp/openFPGALoader
+ENV PATH="/opt/xpack-riscv/bin:${PATH}"
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir pypng meson ninja
 
 # Install LiteX
-RUN pip3 install --break-system-packages \
-    meson \
-    ninja \
-    pyyaml \
-    litex \
-    liteeth
+WORKDIR /litex
+RUN wget -q https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py && \
+    chmod +x litex_setup.py && \
+    ./litex_setup.py --init --install
 
-# Set library path
-ENV LD_LIBRARY_PATH=/usr/local/lib
+# Install Rust for firmware
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    . /root/.cargo/env && \
+    rustup target add riscv32i-unknown-none-elf
 
-WORKDIR /build
+ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Verify installations
-RUN echo "=== Installed Tools ===" \
-    && yosys --version \
-    && nextpnr-ecp5 --version 2>&1 | head -1 || true \
-    && ecppack --help 2>&1 | head -1 || echo "ecppack installed" \
-    && openFPGALoader --version 2>&1 | head -1 || true \
-    && echo "======================"
+WORKDIR /project
 
-CMD ["/bin/bash"]
+ENTRYPOINT ["/bin/bash", "-c"]
+CMD ["bash"]

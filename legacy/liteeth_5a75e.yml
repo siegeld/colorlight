@@ -1,0 +1,28 @@
+# LiteEth config for Colorlight 5A-75E with RTL8211FD PHY
+# Generated for use with liteeth_gen
+
+# Vendor/PHY Configuration
+vendor: lattice
+phy: LiteEthECP5PHYRGMII
+
+# Core Configuration
+clk_freq: 125e6
+core: udp
+data_width: 8
+
+# Network Configuration
+mac_address: 0x10E2D5000001
+ip_address: 10.11.6.250
+
+# RGMII Delays for RTL8211FD
+# RTL8211FD with default strap configuration adds internal TX delay
+# We add RX delay on FPGA side
+phy_tx_delay: 0e-9
+phy_rx_delay: 2e-9
+
+# UDP Ports
+udp_ports:
+  udp0:
+    udp_port: 6000
+    data_width: 8
+    ip_address: 10.11.6.1
