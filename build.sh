@@ -19,6 +19,7 @@ REVISION="8.2"
 IP_ADDRESS="10.11.6.250"
 CABLE="usb-blaster"
 PANEL="96x48"
+PATTERN="grid"
 BUILD_DIR="build/colorlight_5a_75e"
 BITSTREAM="${BUILD_DIR}/gateware/colorlight_5a_75e.bit"
 FIRMWARE_DIR="sw_rust/barsign_disp"
@@ -118,8 +119,8 @@ build_firmware() {
     check_docker_image
 
     # Generate test image for current panel
-    print_step "Generating test image for ${PANEL} panel"
-    docker_run "python3 /project/gen_test_image.py --panel ${PANEL} -o /project/img_data.bin"
+    print_step "Generating test image for ${PANEL} panel (pattern: ${PATTERN})"
+    docker_run "python3 /project/gen_test_image.py --panel ${PANEL} --pattern ${PATTERN} -o /project/img_data.bin"
 
     print_step "Compiling firmware with cargo"
     docker_run "cd /project/${FIRMWARE_DIR} && cargo build --release"
@@ -421,6 +422,8 @@ OPTIONS:
     -i, --ip IP             IP address for firmware (default: 10.11.6.250)
     -c, --cable CABLE       JTAG cable type (default: usb-blaster)
     -p, --panel PANEL       Panel type: 128x64, 96x48, 64x32, 64x64 (default: 96x48)
+    -t, --pattern PATTERN   Test pattern: grid, rainbow, solid_white, solid_red,
+                            solid_green, solid_blue (default: grid)
     --host-ip IP            Host IP for TFTP server (auto-detected if not set)
     -v, --verbose           Enable verbose output
 
@@ -433,6 +436,9 @@ EXAMPLES:
 
     # Build bitstream for a specific panel type
     ./build.sh --panel 128x64 bitstream
+
+    # Build firmware with rainbow test pattern
+    ./build.sh --pattern rainbow firmware boot
 
     # Build bitstream with custom IP
     ./build.sh --ip 192.168.1.100 bitstream
@@ -521,6 +527,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -p|--panel)
             PANEL="$2"
+            shift 2
+            ;;
+        -t|--pattern)
+            PATTERN="$2"
             shift 2
             ;;
         -v|--verbose)
