@@ -5,6 +5,7 @@ use core::convert::TryInto;
 use core::fmt::Write as _;
 
 use barsign_disp::*;
+use bitmap_udp::BitmapReceiver;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::serial::Write;
 use embedded_hal::serial::Read;
@@ -63,7 +64,7 @@ fn main() -> ! {
     let mut neighbor_cache_entries = [None; 8];
     let neighbor_cache = NeighborCache::new(&mut neighbor_cache_entries[..]);
     let mut ip_addrs = [IpCidr::new(ip_address, 24)];
-    let mut sockets_entries: [_; 2] = Default::default();
+    let mut sockets_entries: [_; 3] = Default::default();
     let mut iface = InterfaceBuilder::new(device, &mut sockets_entries[..])
         .hardware_addr(EthernetAddress::from_bytes(&ip_mac.mac).into())
         .neighbor_cache(neighbor_cache)
@@ -92,8 +93,23 @@ fn main() -> ! {
         UdpSocket::new(udp_rx_buffer, udp_tx_buffer)
     };
 
+    let bitmap_udp_socket = {
+        static mut BITMAP_UDP_RX_DATA: [u8; 16384] = [0; 16384];
+        static mut BITMAP_UDP_TX_DATA: [u8; 64] = [0; 64];
+        static mut BITMAP_UDP_RX_META: [UdpPacketMetadata; 12] = [UdpPacketMetadata::EMPTY; 12];
+        static mut BITMAP_UDP_TX_META: [UdpPacketMetadata; 1] = [UdpPacketMetadata::EMPTY; 1];
+        let rx = unsafe {
+            UdpSocketBuffer::new(&mut BITMAP_UDP_RX_META[..], &mut BITMAP_UDP_RX_DATA[..])
+        };
+        let tx = unsafe {
+            UdpSocketBuffer::new(&mut BITMAP_UDP_TX_META[..], &mut BITMAP_UDP_TX_DATA[..])
+        };
+        UdpSocket::new(rx, tx)
+    };
+
     let tcp_server_handle = iface.add_socket(tcp_server_socket);
     let udp_server_handle = iface.add_socket(udp_server_socket);
+    let bitmap_udp_handle = iface.add_socket(bitmap_udp_socket);
 
     // Always turn on HUB75 for debugging (shows firmware is running)
     hub75.on();
@@ -124,11 +140,13 @@ fn main() -> ! {
         flash,
         animation: menu::Animation::None,
         quit: false,
+        debug: false,
+        bitmap_stats: bitmap_udp::BitmapStats::new(),
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
 
-    writeln!(r.context.output.serial, "Starting network loop...").ok();
+    let mut bitmap_rx = BitmapReceiver::new();
 
     let mut time_ms: i64 = 0;
     let mut telnet_active = false;
@@ -144,10 +162,6 @@ fn main() -> ! {
         let time = Instant::from_millis(time_ms);
 
         loop_counter = loop_counter.wrapping_add(1);
-        // Print status every 10 seconds to show we're alive (on serial)
-        if loop_counter % 10000 == 0 {
-            writeln!(r.context.output.serial, "Alive: {} loops, {}ms", loop_counter, time_ms).ok();
-        }
 
         iface.poll(time).ok();
 
@@ -160,8 +174,8 @@ fn main() -> ! {
         // tcp:23: telnet for menu
         {
             let socket = iface.get_socket::<TcpSocket>(tcp_server_handle);
-            if !socket.is_open() && socket.listen(23).is_err() {
-                writeln!(r.context.output.serial, "Couldn't listen to telnet port").ok();
+            if !socket.is_open() {
+                socket.listen(23).ok();
             }
             if !telnet_active && socket.is_active() {
                 iac_state = 0;
@@ -251,8 +265,8 @@ fn main() -> ! {
         // udp:6454: artnet
         {
             let socket = iface.get_socket::<UdpSocket>(udp_server_handle);
-            if !socket.is_open() && socket.bind(6454).is_err() {
-                writeln!(r.context.output.serial, "Couldn't open artnet port").ok();
+            if !socket.is_open() {
+                socket.bind(6454).ok();
             }
 
             match socket.recv() {
@@ -272,6 +286,37 @@ fn main() -> ! {
                 }
                 Err(_) => (),
             };
+        }
+        // udp:7000: bitmap — drain all queued packets
+        {
+            let socket = iface.get_socket::<UdpSocket>(bitmap_udp_handle);
+            if !socket.is_open() {
+                socket.bind(7000).ok();
+            }
+            while socket.can_recv() {
+                match socket.recv() {
+                    Ok((data, _endpoint)) => {
+                        let complete = bitmap_rx.process_packet(data, &mut r.context.hub75);
+                        if r.context.debug {
+                            let s = &bitmap_rx.stats;
+                            writeln!(r.context.output, "BM: pkt={} chunk={}/{} {}x{} len={} mask={:04x}{}",
+                                s.packets_total, s.last_chunk_index + 1, s.last_total_chunks,
+                                s.last_width, s.last_height, s.last_data_len,
+                                s.chunks_received,
+                                if complete { " COMPLETE" } else { "" },
+                            ).ok();
+                        }
+                        if complete {
+                            r.context.hub75.swap_buffers();
+                            r.context.hub75.set_mode(hub75::OutputMode::FullColor);
+                            r.context.hub75.on();
+                            r.context.animation = menu::Animation::None;
+                        }
+                        r.context.bitmap_stats = bitmap_rx.stats;
+                    }
+                    Err(_) => break,
+                }
+            }
         }
         if let Ok(data) = r.context.output.serial.read() {
             r.input_byte(if data == b'\n' { b'\r' } else { data });

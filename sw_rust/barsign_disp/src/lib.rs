@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod artnet;
+pub mod bitmap_udp;
 pub mod ethernet;
 pub mod hal;
 pub mod hub75;

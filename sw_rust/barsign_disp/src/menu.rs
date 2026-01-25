@@ -1,6 +1,7 @@
 use core::fmt::Write;
 use embedded_hal::prelude::_embedded_hal_serial_Write;
 
+use crate::bitmap_udp::BitmapStats;
 use crate::ethernet::IpMacData;
 use crate::hal;
 use crate::hub75::{Hub75, OutputMode};
@@ -41,6 +42,8 @@ pub struct Context {
     pub ip_mac: IpMacData,
     pub animation: Animation,
     pub quit: bool,
+    pub debug: bool,
+    pub bitmap_stats: BitmapStats,
 }
 
 impl Context {
@@ -223,6 +226,22 @@ pub const ROOT_MENU: Menu<Context> = Menu {
             },
             command: "pattern",
             help: Some("Display a test pattern"),
+        },
+        &Item {
+            item_type: ItemType::Callback {
+                function: bitmap_status,
+                parameters: &[],
+            },
+            command: "bitmap_status",
+            help: Some("Show bitmap UDP receiver stats"),
+        },
+        &Item {
+            item_type: ItemType::Callback {
+                function: debug_toggle,
+                parameters: &[],
+            },
+            command: "debug",
+            help: Some("Toggle debug output on/off"),
         },
     ],
     entry: None,
@@ -489,6 +508,40 @@ fn pattern(
     hub75.set_mode(OutputMode::FullColor);
     hub75.on();
     writeln!(context.output, "Pattern '{}' loaded ({}x{})", name, w, h).unwrap();
+}
+
+fn bitmap_status(
+    _menu: &Menu<Context>,
+    _item: &Item<Context>,
+    _args: &[&str],
+    context: &mut Context,
+) {
+    let s = &context.bitmap_stats;
+    writeln!(context.output, "Bitmap UDP stats:").unwrap();
+    writeln!(context.output, "  packets total: {}", s.packets_total).unwrap();
+    writeln!(context.output, "  packets valid: {}", s.packets_valid).unwrap();
+    writeln!(context.output, "  bad magic: {}", s.packets_bad_magic).unwrap();
+    writeln!(context.output, "  bad header: {}", s.packets_bad_header).unwrap();
+    writeln!(context.output, "  frames completed: {}", s.frames_completed).unwrap();
+    writeln!(context.output, "  last frame_id: {}", s.last_frame_id).unwrap();
+    writeln!(context.output, "  last chunk: {}/{}", s.last_chunk_index, s.last_total_chunks).unwrap();
+    writeln!(context.output, "  last size: {}x{}", s.last_width, s.last_height).unwrap();
+    writeln!(context.output, "  last data len: {}", s.last_data_len).unwrap();
+    writeln!(context.output, "  chunks_received: 0b{:016b}", s.chunks_received).unwrap();
+}
+
+fn debug_toggle(
+    _menu: &Menu<Context>,
+    _item: &Item<Context>,
+    _args: &[&str],
+    context: &mut Context,
+) {
+    context.debug = !context.debug;
+    if context.debug {
+        writeln!(context.output, "Debug ON").unwrap();
+    } else {
+        writeln!(context.output, "Debug OFF").unwrap();
+    }
 }
 
 // fn set_mac_ip(_menu: &Menu<Context>, item: &Item<Context>, args: &[&str], context: &mut Context) {

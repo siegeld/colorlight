@@ -11,6 +11,7 @@
 | Ping | Working | Via smoltcp ICMP |
 | Telnet | Working | Port 23, IAC filtering, quit command |
 | Animation | Working | 30fps double-buffered via fb_base CSR |
+| Bitmap UDP | Working | Port 7000, chunked RGB images, Python sender tools |
 | Flash Boot | **Broken** | Needs flash chip update for rev 8.2 |
 | Art-Net | Partial | Palette works, pixels disabled |
 

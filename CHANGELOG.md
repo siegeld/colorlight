@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.4] - 2026-01-25
+
+### Added
+- **Bitmap UDP protocol** - Send RGB images to the panel over UDP port 7000
+  - 10-byte little-endian header: magic "BM", frame_id, chunk_index, total_chunks, width, height
+  - Pixel-aligned chunking (487 pixels / 1461 bytes per chunk, 10 chunks for 96x48)
+  - Bitmask-based frame assembly with automatic buffer swap on completion
+  - 16KB receive buffer with drain loop for reliable multi-packet reception
+- **`bitmap_status` telnet command** - Shows packet counters, frame completion stats, and last packet details
+- **`debug` telnet command** - Toggle live per-packet logging to telnet console
+- **`tools/send_image.py`** - Send any image file (resized to panel dimensions) via UDP
+- **`tools/send_test_pattern.py`** - Generate and send test patterns (gradient, bars, rainbow) without needing an image file
+
+---
+
 ## [0.2.3] - 2026-01-25
 
 ### Added
@@ -107,6 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.4 | 2026-01-25 | Bitmap UDP protocol for sending images |
 | 0.2.3 | 2026-01-25 | Telnet IAC filtering and quit command |
 | 0.2.2 | 2026-01-25 | Framebuffer double buffering via fb_base CSR |
 | 0.2.1 | 2026-01-25 | Animated rainbow pattern |
