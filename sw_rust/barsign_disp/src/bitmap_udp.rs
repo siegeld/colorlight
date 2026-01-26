@@ -11,6 +11,7 @@ pub struct BitmapStats {
     pub packets_bad_magic: u32,
     pub packets_bad_header: u32,
     pub frames_completed: u32,
+    pub frames_dropped: u32,
     pub last_frame_id: u16,
     pub last_chunk_index: u8,
     pub last_total_chunks: u8,
@@ -18,6 +19,9 @@ pub struct BitmapStats {
     pub last_height: u16,
     pub last_data_len: u16,
     pub chunks_received: u32,
+    pub frame_interval_ms: u32,
+    pub avg_interval_ms: u32,
+    pub jitter_ms: u32,
 }
 
 impl BitmapStats {
@@ -28,6 +32,7 @@ impl BitmapStats {
             packets_bad_magic: 0,
             packets_bad_header: 0,
             frames_completed: 0,
+            frames_dropped: 0,
             last_frame_id: 0,
             last_chunk_index: 0,
             last_total_chunks: 0,
@@ -35,6 +40,9 @@ impl BitmapStats {
             last_height: 0,
             last_data_len: 0,
             chunks_received: 0,
+            frame_interval_ms: 0,
+            avg_interval_ms: 0,
+            jitter_ms: 0,
         }
     }
 }
@@ -45,6 +53,7 @@ pub struct BitmapReceiver {
     total_chunks: u8,
     width: u16,
     height: u16,
+    last_complete_ms: i64,
     pub stats: BitmapStats,
 }
 
@@ -56,12 +65,13 @@ impl BitmapReceiver {
             total_chunks: 0,
             width: 0,
             height: 0,
+            last_complete_ms: 0,
             stats: BitmapStats::new(),
         }
     }
 
     /// Process one UDP packet. Returns true if the frame is now complete.
-    pub fn process_packet(&mut self, data: &[u8], hub75: &mut Hub75) -> bool {
+    pub fn process_packet(&mut self, data: &[u8], hub75: &mut Hub75, time_ms: i64) -> bool {
         self.stats.packets_total += 1;
         self.stats.last_data_len = data.len() as u16;
 
@@ -97,6 +107,10 @@ impl BitmapReceiver {
 
         // New frame: reset state and configure image params
         if frame_id != self.current_frame_id {
+            // Previous frame was incomplete — count as dropped
+            if self.chunks_received != 0 {
+                self.stats.frames_dropped += 1;
+            }
             self.current_frame_id = frame_id;
             self.chunks_received = 0;
             self.total_chunks = total_chunks;
@@ -126,6 +140,26 @@ impl BitmapReceiver {
         if complete {
             self.stats.frames_completed += 1;
             self.chunks_received = 0; // ready for next frame
+
+            // Update frame timing stats
+            if self.last_complete_ms > 0 {
+                let interval = (time_ms - self.last_complete_ms) as u32;
+                self.stats.frame_interval_ms = interval;
+                if self.stats.avg_interval_ms == 0 {
+                    self.stats.avg_interval_ms = interval;
+                } else {
+                    // EMA: avg = (avg * 7 + new) / 8
+                    self.stats.avg_interval_ms =
+                        (self.stats.avg_interval_ms * 7 + interval) >> 3;
+                }
+                let avg = self.stats.avg_interval_ms;
+                self.stats.jitter_ms = if interval > avg {
+                    interval - avg
+                } else {
+                    avg - interval
+                };
+            }
+            self.last_complete_ms = time_ms;
         }
         complete
     }

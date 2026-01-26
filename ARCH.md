@@ -52,7 +52,7 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | `sw_rust/barsign_disp/src/tftp_config.rs` | TFTP client for fetching MAC-based YAML config at boot |
 | `sw_rust/barsign_disp/src/layout.rs` | Panel layout config parser (YAML `key: value` and `key=value`) |
 | `sw_rust/barsign_disp/src/ethernet.rs` | smoltcp device driver |
-| `sw_rust/smoltcp-0.8.0/` | Patched smoltcp: exposes DHCP `siaddr` as `Config.server_ip` |
+| `sw_rust/smoltcp-0.8.0/` | Patched smoltcp: exposes DHCP Option 66 as `Config.tftp_server_name` |
 | `sw_rust/litex-pac/` | Generated peripheral access crate |
 | `.tftp/` | TFTP root: `boot.bin` (firmware) + `<mac>.yml` (per-board config) |
 

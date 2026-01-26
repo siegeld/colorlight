@@ -112,7 +112,7 @@ impl HttpRequest {
 // ── Response Writer ─────────────────────────────────────────────
 
 pub struct HttpResponse {
-    pub data: heapless::Vec<u8, 2560>,
+    pub data: heapless::Vec<u8, 2816>,
 }
 
 impl HttpResponse {
@@ -213,11 +213,17 @@ li{{padding:2px 0}}\
     write!(resp, "<tr><td>Animation</td><td>{}</td></tr>", anim).ok();
     write!(resp, "<tr><td>Bitmap frames</td><td>{}</td></tr>",
         ctx.bitmap_stats.frames_completed).ok();
+    write!(resp, "<tr><td>Dropped frames</td><td>{}</td></tr>",
+        ctx.bitmap_stats.frames_dropped).ok();
+    {
+        let avg = ctx.bitmap_stats.avg_interval_ms;
+        let fps = if avg > 0 { 1000 / avg } else { 0 };
+        write!(resp, "<tr><td>FPS</td><td>{} ({}ms jitter)</td></tr>",
+            fps, ctx.bitmap_stats.jitter_ms).ok();
+    }
     match ctx.boot_server {
         Some((ip, source)) => {
             let src = match source {
-                BootServerSource::None => "unknown",
-                BootServerSource::Siaddr => "siaddr",
                 BootServerSource::Option66 => "option 66",
                 BootServerSource::Fallback => "fallback",
             };
@@ -412,12 +418,16 @@ fn api_display_pattern(req: &HttpRequest, resp: &mut HttpResponse, ctx: &mut Con
 fn api_bitmap_stats(resp: &mut HttpResponse, ctx: &Context) {
     resp.ok_json();
     let s = &ctx.bitmap_stats;
+    let fps = if s.avg_interval_ms > 0 { 1000 / s.avg_interval_ms } else { 0 };
     write!(resp, r#"{{"packets_total":{},"packets_valid":{},"#,
         s.packets_total, s.packets_valid).ok();
     write!(resp, r#""bad_magic":{},"bad_header":{},"#,
         s.packets_bad_magic, s.packets_bad_header).ok();
-    write!(resp, r#""frames_completed":{},"last_frame_id":{},"#,
-        s.frames_completed, s.last_frame_id).ok();
+    write!(resp, r#""frames_completed":{},"frames_dropped":{},"#,
+        s.frames_completed, s.frames_dropped).ok();
+    write!(resp, r#""fps":{},"frame_interval_ms":{},"avg_interval_ms":{},"jitter_ms":{},"#,
+        fps, s.frame_interval_ms, s.avg_interval_ms, s.jitter_ms).ok();
+    write!(resp, r#""last_frame_id":{},"#, s.last_frame_id).ok();
     write!(resp, r#""last_chunk":"{}/{}","last_size":"{}x{}","last_data_len":{}}}"#,
         s.last_chunk_index, s.last_total_chunks,
         s.last_width, s.last_height, s.last_data_len).ok();

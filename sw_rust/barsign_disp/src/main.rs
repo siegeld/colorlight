@@ -227,7 +227,7 @@ fn main() -> ! {
                     match socket.recv() {
                         Ok((data, _endpoint)) => {
                             got_any = true;
-                            let complete = bitmap_rx.process_packet(data, &mut r.context.hub75);
+                            let complete = bitmap_rx.process_packet(data, &mut r.context.hub75, time_ms);
                             if r.context.debug {
                                 let s = &bitmap_rx.stats;
                                 writeln!(r.context.output, "BM: pkt={} chunk={}/{} {}x{} len={} mask={:04x}{}",
@@ -269,32 +269,28 @@ fn main() -> ! {
                         if let Some(router) = config.router {
                             iface.routes_mut().add_default_ipv4_route(router).ok();
                         }
-                        // Start TFTP config load — prefer siaddr, then option 66, then fallback
-                        {
+                        // Start TFTP config load — Option 66 or hardcoded fallback
+                        if !tftp_loader.is_active() && !tftp_loader.is_done() {
                             use crate::menu::BootServerSource;
-                            let (server, source) = if let Some(ip) = config.server_ip {
-                                (ip, BootServerSource::Siaddr)
-                            } else if let Some(ip) = config.tftp_server_name {
+                            let (server, source) = if let Some(ip) = config.tftp_server_name {
                                 (ip, BootServerSource::Option66)
                             } else {
                                 (Ipv4Address([10, 11, 6, 65]), BootServerSource::Fallback)
                             };
                             r.context.boot_server = Some((server.0, source));
-                            if !tftp_loader.is_active() && !tftp_loader.is_done() {
-                                // Build MAC-based filename: 02-78-7b-21-ae-53.yml
-                                let m = &r.context.mac;
-                                let mut fname = [0u8; 21]; // "xx-xx-xx-xx-xx-xx.yml"
-                                const HEX: &[u8; 16] = b"0123456789abcdef";
-                                for i in 0..6 {
-                                    fname[i * 3] = HEX[(m[i] >> 4) as usize];
-                                    fname[i * 3 + 1] = HEX[(m[i] & 0xf) as usize];
-                                    if i < 5 { fname[i * 3 + 2] = b'-'; }
-                                }
-                                fname[17..21].copy_from_slice(b".yml");
-                                let fname_str = core::str::from_utf8(&fname).unwrap_or("config.yml");
-                                writeln!(r.context.output, "TFTP: fetching {} from {}", fname_str, server).ok();
-                                tftp_loader.start(server, fname_str);
+                            // Build MAC-based filename: 02-78-7b-21-ae-53.yml
+                            let m = &r.context.mac;
+                            let mut fname = [0u8; 21]; // "xx-xx-xx-xx-xx-xx.yml"
+                            const HEX: &[u8; 16] = b"0123456789abcdef";
+                            for i in 0..6 {
+                                fname[i * 3] = HEX[(m[i] >> 4) as usize];
+                                fname[i * 3 + 1] = HEX[(m[i] & 0xf) as usize];
+                                if i < 5 { fname[i * 3 + 2] = b'-'; }
                             }
+                            fname[17..21].copy_from_slice(b".yml");
+                            let fname_str = core::str::from_utf8(&fname).unwrap_or("config.yml");
+                            writeln!(r.context.output, "TFTP: fetching {} from {}", fname_str, server).ok();
+                            tftp_loader.start(server, fname_str);
                         }
                     }
                     Dhcpv4Event::Deconfigured => {

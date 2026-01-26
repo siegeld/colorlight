@@ -119,7 +119,7 @@ colorlight/
 ├── sw_rust/               # Rust firmware
 │   ├── barsign_disp/      # Main application
 │   ├── litex-pac/         # Peripheral Access Crate
-│   └── smoltcp-0.8.0/     # Patched smoltcp (DHCP siaddr + Option 66)
+│   └── smoltcp-0.8.0/     # Patched smoltcp (DHCP Option 66)
 ├── tools/                 # Python tools for sending content to the panel
 ├── .tftp/                 # TFTP-served config files (<mac>.yml)
 ├── legacy/                # Old scripts and experiments
@@ -264,18 +264,13 @@ The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is lo
 
 ### TFTP Server IP
 
-The firmware discovers the TFTP server address from DHCP, with a hardcoded fallback:
+Both the BIOS (`boot.bin`) and firmware (`<mac>.yml`) fetch from the same TFTP server on port **6969**.
 
-- **Firmware `<mac>.yml` config fetch** — Uses the DHCP server IP in this priority order:
-  1. `siaddr` (DHCP header "next server" field)
-  2. DHCP Option 66 (TFTP Server Name — parsed as dotted-decimal IP)
-  3. Hardcoded fallback: `10.11.6.65`
+- **BIOS `boot.bin` fetch** — The BIOS fetches firmware from the hardcoded server `10.11.6.65:6969`.
 
-  Configure your DHCP server to provide the TFTP server address. For **Windows DHCP Server**, set **Option 066** (Boot Server Host Name) on the scope to the TFTP server's IP. For **dnsmasq**, use `dhcp-boot=boot.bin,,<ip>`.
+- **Firmware `<mac>.yml` config fetch** — Uses DHCP Option 66 if provided, otherwise falls back to `10.11.6.65`. Configure your DHCP server to provide the TFTP server address: for **Windows DHCP Server**, set **Option 066** (Boot Server Host Name); for **dnsmasq**, use `dhcp-boot=boot.bin,,<ip>`.
 
-  The web status page shows the active boot server and how it was discovered (siaddr, option 66, or fallback).
-
-- **BIOS `boot.bin` fetch** — The BIOS broadcasts its TFTP request to `255.255.255.255` on port **6969**. Any TFTP server on the subnet listening on that port will respond. The non-standard port prevents conflicts with other TFTP servers.
+  The web status page shows the active TFTP server and whether it came from Option 66 or the hardcoded fallback.
 
 ## Pre-built Binaries
 
@@ -301,7 +296,7 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 ## Known Issues
 
 - **Art-Net**: Palette updates work, direct pixel writes commented out
-- **BIOS TFTP**: Uses broadcast on non-standard port 6969 — requires matching TFTP server configuration
+- **BIOS TFTP**: Uses hardcoded server `10.11.6.65` on non-standard port 6969
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and fixes.
 
