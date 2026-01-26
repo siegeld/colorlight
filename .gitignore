@@ -77,7 +77,8 @@ Thumbs.db
 # Local Development
 # -----------------------------------------------------------------------------
 .claude/
-.tftp/
+.tftp/boot.bin
+.tftp/dnsmasq.*
 *.tmp
 *.log
 *.bak
