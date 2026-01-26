@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.6] - 2026-01-25
+
+### Added
+- **HTTP REST API** - Web status page and JSON API on port 80
+  - `GET /` — HTML status page with MAC, IP, display config, panel layout
+  - `GET /api/status` — JSON system status
+  - `GET /api/layout` / `POST /api/layout` — Get/set panel grid layout
+  - `POST /api/layout/apply` — Apply layout to HUB75 hardware
+  - `GET /api/display` / `POST /api/display/on` / `POST /api/display/off` — Display control
+  - `POST /api/display/pattern` — Load test patterns (grid, rainbow, rainbow_anim, solid colors)
+  - `GET /api/bitmap/stats` — Bitmap UDP receiver statistics
+- **Dual HTTP sockets** — Two TCP sockets on port 80 so one can accept new connections while the other completes graceful TCP close, eliminating "site cannot be reached" on browser refresh
+
+### Changed
+- `http.rs` — New module with minimal HTTP/1.1 request parser, response writer, and route dispatcher
+
+---
+
 ## [0.2.5] - 2026-01-25
 
 ### Added
@@ -142,6 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.6 | 2026-01-25 | HTTP REST API with dual-socket refresh fix |
 | 0.2.5 | 2026-01-25 | DHCP client with unique MAC from SPI flash |
 | 0.2.4 | 2026-01-25 | Bitmap UDP protocol for sending images |
 | 0.2.3 | 2026-01-25 | Telnet IAC filtering and quit command |

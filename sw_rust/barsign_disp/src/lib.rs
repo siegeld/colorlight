@@ -5,6 +5,7 @@ pub mod bitmap_udp;
 pub mod ethernet;
 pub mod flash_id;
 pub mod hal;
+pub mod http;
 pub mod hub75;
 pub mod img;
 pub mod img_flash;

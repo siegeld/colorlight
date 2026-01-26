@@ -13,6 +13,7 @@
 | Ping | Working | Via smoltcp ICMP |
 | Telnet | Working | Port 23, IAC filtering, quit command |
 | Animation | Working | 30fps double-buffered via fb_base CSR |
+| HTTP API | Working | Port 80, status page + REST API, dual-socket for fast refresh |
 | Bitmap UDP | Working | Port 7000, chunked RGB images, Python sender tools |
 | Flash Boot | **Broken** | Needs flash chip update for rev 8.2 |
 | Art-Net | Partial | Palette works, pixels disabled |
@@ -64,6 +65,7 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | `hub75.py` | HUB75 display driver gateware (includes `fb_base` CSR) |
 | `smoleth.py` | Custom ethernet module (currently unused, kept for reference) |
 | `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, network loop, DHCP, telnet IAC parser |
+| `sw_rust/barsign_disp/src/http.rs` | HTTP/1.1 server: status page, REST API for layout/display/patterns |
 | `sw_rust/barsign_disp/src/hub75.rs` | HUB75 driver: double-buffered framebuffer, swap_buffers() |
 | `sw_rust/barsign_disp/src/menu.rs` | Telnet CLI commands (pattern, quit, animation) |
 | `sw_rust/barsign_disp/src/flash_id.rs` | Read SPI flash unique ID, derive MAC address |

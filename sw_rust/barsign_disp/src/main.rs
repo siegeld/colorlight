@@ -65,7 +65,7 @@ fn main() -> ! {
     let mut ip_addrs = [IpCidr::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0)];
     let mut routes_storage = [None; 1];
     let routes = Routes::new(&mut routes_storage[..]);
-    let mut sockets_entries: [_; 5] = Default::default();
+    let mut sockets_entries: [_; 7] = Default::default();
     let mut iface = InterfaceBuilder::new(device, &mut sockets_entries[..])
         .hardware_addr(EthernetAddress::from_bytes(&mac_bytes).into())
         .neighbor_cache(neighbor_cache)
@@ -123,6 +123,21 @@ fn main() -> ! {
         UdpSocket::new(rx, tx)
     };
 
+    let http_tcp_socket_a = {
+        static mut HTTP_TCP_RX_A: [u8; 512] = [0; 512];
+        static mut HTTP_TCP_TX_A: [u8; 2048] = [0; 2048];
+        let rx = TcpSocketBuffer::new(unsafe { &mut HTTP_TCP_RX_A[..] });
+        let tx = TcpSocketBuffer::new(unsafe { &mut HTTP_TCP_TX_A[..] });
+        TcpSocket::new(rx, tx)
+    };
+    let http_tcp_socket_b = {
+        static mut HTTP_TCP_RX_B: [u8; 512] = [0; 512];
+        static mut HTTP_TCP_TX_B: [u8; 2048] = [0; 2048];
+        let rx = TcpSocketBuffer::new(unsafe { &mut HTTP_TCP_RX_B[..] });
+        let tx = TcpSocketBuffer::new(unsafe { &mut HTTP_TCP_TX_B[..] });
+        TcpSocket::new(rx, tx)
+    };
+
     let dhcp_socket = Dhcpv4Socket::new();
 
     let tcp_server_handle = iface.add_socket(tcp_server_socket);
@@ -130,6 +145,8 @@ fn main() -> ! {
     let bitmap_udp_handle = iface.add_socket(bitmap_udp_socket);
     let tftp_udp_handle = iface.add_socket(tftp_udp_socket);
     let dhcp_handle = iface.add_socket(dhcp_socket);
+    let http_handle_a = iface.add_socket(http_tcp_socket_a);
+    let http_handle_b = iface.add_socket(http_tcp_socket_b);
 
     // Always turn on HUB75 for debugging (shows firmware is running)
     hub75.on();
@@ -176,6 +193,13 @@ fn main() -> ! {
     // Telnet IAC parser state: 0=normal, 1=got IAC(0xFF), 2=got cmd(WILL/WONT/DO/DONT),
     // 3=in subnegotiation, 4=got IAC inside subnegotiation
     let mut iac_state: u8 = 0;
+
+    // HTTP server state — two sockets so one can accept while the other closes
+    let http_handles = [http_handle_a, http_handle_b];
+    let mut http_requests = [http::HttpRequest::new(), http::HttpRequest::new()];
+    let mut http_responses = [http::HttpResponse::new(), http::HttpResponse::new()];
+    let mut http_response_sent = [0usize; 2];
+    let mut http_close_at = [0i64; 2];
 
     loop {
         // Use real timing: poll every 1ms
@@ -395,6 +419,52 @@ fn main() -> ! {
                         r.context.bitmap_stats = bitmap_rx.stats;
                     }
                     Err(_) => break,
+                }
+            }
+        }
+        // tcp:80: HTTP server (two sockets — one accepts while the other closes)
+        {
+            let http_ip = match iface.ip_addrs()[0].address() {
+                IpAddress::Ipv4(v4) => v4.0,
+                _ => [0u8; 4],
+            };
+            for i in 0..2 {
+                let socket = iface.get_socket::<TcpSocket>(http_handles[i]);
+                // Recycle socket after graceful close
+                if http_close_at[i] > 0 {
+                    if !socket.is_active() || time_ms >= http_close_at[i] {
+                        if socket.is_open() {
+                            socket.abort();
+                        }
+                        http_close_at[i] = 0;
+                    }
+                }
+                if !socket.is_open() {
+                    http_requests[i].reset();
+                    http_responses[i].data.clear();
+                    http_response_sent[i] = 0;
+                    socket.listen(80).ok();
+                }
+                if socket.can_recv() && !http_requests[i].is_complete() {
+                    let mut buf = [0u8; 128];
+                    if let Ok(n) = socket.recv_slice(&mut buf) {
+                        if http_requests[i].feed(&buf[..n]) {
+                            http::handle_request(
+                                &http_requests[i], &mut http_responses[i],
+                                &mut r.context, http_ip,
+                            );
+                            http_response_sent[i] = 0;
+                        }
+                    }
+                }
+                if socket.can_send() && http_response_sent[i] < http_responses[i].data.len() {
+                    if let Ok(sent) = socket.send_slice(&http_responses[i].data[http_response_sent[i]..]) {
+                        http_response_sent[i] += sent;
+                    }
+                    if http_response_sent[i] >= http_responses[i].data.len() && http_responses[i].data.len() > 0 {
+                        socket.close();
+                        http_close_at[i] = time_ms + 50;
+                    }
                 }
             }
         }
