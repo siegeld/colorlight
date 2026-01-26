@@ -298,7 +298,7 @@ ensure_tftp() {
 
     mkdir -p "${TFTP_DIR}"
     print_step "Starting TFTP server on ${HOST_IP}"
-    sudo dnsmasq --port=0 --enable-tftp \
+    sudo dnsmasq --port=0 --enable-tftp --tftp-port=6969 \
         --tftp-root="${TFTP_DIR}" --listen-address="${HOST_IP}" \
         --log-queries --log-facility="${TFTP_DIR}/dnsmasq.log" \
         --pid-file="${TFTP_DIR}/dnsmasq.pid"

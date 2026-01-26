@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.2.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -275,7 +275,7 @@ The firmware discovers the TFTP server address from DHCP, with a hardcoded fallb
 
   The web status page shows the active boot server and how it was discovered (siaddr, option 66, or fallback).
 
-- **BIOS `boot.bin` fetch** — The LiteX BIOS has the TFTP server IP baked into the bitstream at build time via the `remote_ip` parameter in `gateware/colorlight.py`. It does not use DHCP.
+- **BIOS `boot.bin` fetch** — The BIOS broadcasts its TFTP request to `255.255.255.255` on port **6969**. Any TFTP server on the subnet listening on that port will respond. The non-standard port prevents conflicts with other TFTP servers.
 
 ## Pre-built Binaries
 
@@ -301,7 +301,7 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 ## Known Issues
 
 - **Art-Net**: Palette updates work, direct pixel writes commented out
-- **BIOS TFTP server IP**: Hardcoded to `10.11.6.65` in the BIOS bitstream (firmware TFTP is now dynamic via DHCP)
+- **BIOS TFTP**: Uses broadcast on non-standard port 6969 — requires matching TFTP server configuration
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and fixes.
 

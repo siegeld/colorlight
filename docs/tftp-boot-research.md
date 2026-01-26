@@ -44,19 +44,17 @@ The BIOS has no dynamic IP discovery. IP addresses come from `LOCALIP1-4` and `R
 
 ## Proposed Solutions
 
-### 1. Broadcast Hack (BIOS)
+### 1. Broadcast + Custom Port (BIOS) — ✅ DONE (v1.3.0)
 
-Set `remote_ip="255.255.255.255"` in `gateware/colorlight.py`. The BIOS will broadcast its TFTP RRQ, and any TFTP server on the subnet will receive and respond. Since the BIOS doesn't check source IP, it will accept the response.
+Implemented in v1.3.0. The BIOS now broadcasts its TFTP RRQ to `255.255.255.255` on port **6969** (non-standard). This means:
+- Any TFTP server on the subnet can respond (no hardcoded server IP)
+- Only a server listening on port 6969 will respond (no conflicts with standard TFTP on port 69)
+- The BIOS doesn't check source IP, so it accepts the first response
 
-**Pros:** Zero server-side configuration. Any TFTP server works.
-
-**Cons:** If multiple TFTP servers have `boot.bin`, all respond (race condition). Mitigate by combining with a custom `TFTP_SERVER_PORT` — only a server listening on that port responds.
-
-**dnsmasq config for custom port:**
-```
-# Listen for TFTP on a non-standard port (e.g., 6969)
-tftp-port-range=6969,6969
-```
+All three layers use port 6969:
+- `gateware/colorlight.py` — `remote_ip="255.255.255.255"` + `TFTP_SERVER_PORT=6969`
+- `sw_rust/barsign_disp/src/tftp_config.rs` — `TFTP_PORT=6969`
+- `build.sh` — dnsmasq started with `--tftp-port=6969`
 
 ### 2. DHCP `siaddr` / Option 66 (Firmware) — ✅ DONE (v1.2.0)
 

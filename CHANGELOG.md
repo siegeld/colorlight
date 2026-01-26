@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2026-01-26
+
+### Added
+- **BIOS broadcast TFTP on custom port** — BIOS now broadcasts its TFTP request to `255.255.255.255` on port 6969 instead of unicasting to a hardcoded IP on port 69. Any TFTP server on the subnet listening on port 6969 will respond. Eliminates the last hardcoded server IP.
+
+### Changed
+- **TFTP port 69 → 6969** — All three layers (BIOS bitstream, Rust firmware, dnsmasq server) now use port 6969 to avoid conflicts with other TFTP servers on the network
+
+---
+
 ## [1.2.0] - 2026-01-26
 
 ### Added
@@ -259,6 +269,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.3.0 | 2026-01-26 | BIOS broadcast TFTP on custom port 6969 |
 | 1.2.0 | 2026-01-26 | Dynamic TFTP server via DHCP siaddr/Option 66 |
 | 1.1.0 | 2026-01-26 | Web reboot button, modern dark theme, build.sh TFTP fix |
 | 1.0.0 | 2026-01-26 | First stable release: multi-panel build, auto TFTP, repo cleanup |

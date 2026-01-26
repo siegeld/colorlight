@@ -269,8 +269,11 @@ class BaseSoC(SoCCore):
             nrxslots=4,
             ntxslots=2,
             local_ip=ip_address,
-            remote_ip="10.11.6.65",  # Not used, but required
+            remote_ip="255.255.255.255",
         )
+
+        # Use non-standard TFTP port so only our server responds to broadcast
+        self.add_constant("TFTP_SERVER_PORT", 6969)
 
         # Timing constraints
         eth_rx_clk = getattr(phy, "crg", phy).cd_eth_rx.clk

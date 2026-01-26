@@ -6,7 +6,7 @@
 use smoltcp::socket::UdpSocket;
 use smoltcp::wire::{IpEndpoint, Ipv4Address};
 
-const TFTP_PORT: u16 = 69;
+const TFTP_PORT: u16 = 6969;
 const OPCODE_RRQ: u8 = 1;
 const OPCODE_DATA: u8 = 3;
 const OPCODE_ACK: u8 = 4;
