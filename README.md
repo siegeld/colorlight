@@ -51,26 +51,30 @@ Connect these to your USB Blaster or FTDI programmer's corresponding JTAG signal
 - USB Blaster or compatible JTAG programmer
 - Network connection to the board
 
-### Using the Build Script (Recommended)
+### Build
 
-The `build.sh` script simplifies the entire workflow:
+All builds use Docker for reproducibility. Run `./build.sh --help` for full options.
 
 ```bash
-# Build everything (Docker image, bitstream, firmware)
+# First time: build Docker environment
+./build.sh docker
+
+# Build bitstream + firmware for default panel (128x64)
 ./build.sh
 
-# Build for a specific panel type
-./build.sh --panel 128x64 bitstream firmware
+# Build bitstreams for ALL panel sizes at once
+./build.sh build-all
 
-# Or step by step
-./build.sh docker      # Build Docker environment
-./build.sh bitstream   # Build FPGA bitstream
-./build.sh firmware    # Build Rust firmware
-./build.sh boot        # Program SRAM + boot via TFTP
-./build.sh flash       # Program to SPI flash (persistent)
+# Build for a specific panel
+./build.sh --panel 96x48 bitstream
 
-# Show all options
-./build.sh --help
+# Flash and boot
+./build.sh flash                    # flash default panel
+./build.sh --panel 96x48 flash      # flash a specific panel
+./build.sh boot                     # program SRAM + TFTP boot
+
+# TFTP server auto-starts after firmware build; stop manually:
+./build.sh stop
 ```
 
 ### Supported Panels
@@ -82,43 +86,7 @@ The `build.sh` script simplifies the entire workflow:
 | 64x32 | 1/16 | Compact |
 | 64x64 | 1/32 | Square format |
 
-### Manual Build Steps
-
-If you prefer manual control:
-
-#### 1. Build Docker Environment
-
-```bash
-docker build -t litex-hub75 .
-```
-
-#### 2. Build Bitstream & Firmware
-
-```bash
-# Build FPGA bitstream
-docker run --rm -v "$(pwd):/project" litex-hub75 \
-    "./colorlight.py --revision 8.2 --ip-address 10.11.6.250 --build"
-
-# Build Rust firmware
-docker run --rm -v "$(pwd):/project" litex-hub75 \
-    "cd /project/sw_rust/barsign_disp && cargo build --release"
-```
-
-#### 3. Program the FPGA
-
-```bash
-# Flash bitstream to SPI (persistent across power cycles)
-# NOTE: --board colorlight is required for correct flash chip handling
-docker run --rm -v "$(pwd):/project" -v /dev/bus/usb:/dev/bus/usb --privileged \
-    litex-hub75 "openFPGALoader --board colorlight --cable usb-blaster \
-    -f --unprotect-flash \
-    /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
-
-# Or load to SRAM (temporary, for testing)
-docker run --rm -v "$(pwd):/project" -v /dev/bus/usb:/dev/bus/usb --privileged \
-    litex-hub75 "openFPGALoader --cable usb-blaster \
-    /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
-```
+The firmware binary is universal — it works with all panel sizes. Only the FPGA bitstream differs per panel. Panel dimensions are configured at runtime via TFTP config files (see below). Use `./build.sh build-all` to pre-build bitstreams for all panels, stored in `bitstreams/`.
 
 ### Test Connection
 
@@ -231,7 +199,7 @@ telnet <board-ip> 23
 4. **Config fetch** — Firmware fetches `<mac>.yml` from TFTP server
 5. **Layout applied** — Panel grid configured and display redrawn
 
-The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot.
+The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot. The TFTP server is started automatically by `./build.sh firmware` or `./build.sh boot` and stays running in the background. Use `./build.sh stop` to shut it down.
 
 ## Pre-built Binaries
 

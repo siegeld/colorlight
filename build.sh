@@ -108,9 +108,51 @@ build_bitstream() {
 
     if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
         print_success "Bitstream built: ${BITSTREAM}"
+        # Copy to bitstreams/ for multi-panel support
+        mkdir -p "${SCRIPT_DIR}/bitstreams"
+        cp "${SCRIPT_DIR}/${BITSTREAM}" "${SCRIPT_DIR}/bitstreams/${PANEL}.bit"
+        print_step "Copied to bitstreams/${PANEL}.bit"
     else
         print_error "Bitstream not found at expected location"
         exit 1
+    fi
+}
+
+build_all_panels() {
+    print_header "Building All Panel Bitstreams"
+    check_docker_image
+    mkdir -p "${SCRIPT_DIR}/bitstreams"
+
+    for panel in 128x64 96x48 64x32 64x64; do
+        echo ""
+        print_step "Building bitstream for ${panel}..."
+        docker_run "./colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${panel} --build"
+        if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
+            cp "${SCRIPT_DIR}/${BITSTREAM}" "${SCRIPT_DIR}/bitstreams/${panel}.bit"
+            print_success "bitstreams/${panel}.bit"
+        else
+            print_error "Build failed for ${panel}"
+            exit 1
+        fi
+    done
+
+    # Firmware is universal — build once (PAC/CSRs are identical for all panels)
+    echo ""
+    build_firmware
+
+    echo ""
+    print_success "All panel bitstreams built:"
+    ls -lh "${SCRIPT_DIR}/bitstreams/"
+}
+
+get_bitstream_path() {
+    local panel_bit="${SCRIPT_DIR}/bitstreams/${PANEL}.bit"
+    if [[ -f "${panel_bit}" ]]; then
+        echo "${panel_bit}"
+    elif [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
+        echo "${SCRIPT_DIR}/${BITSTREAM}"
+    else
+        echo ""
     fi
 }
 
@@ -163,16 +205,18 @@ program_sram() {
     print_header "Programming FPGA (SRAM - Temporary)"
     check_docker_image
 
-    if [[ ! -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
-        print_error "Bitstream not found: ${BITSTREAM}"
-        print_warning "Run './build.sh bitstream' first"
+    local bit=$(get_bitstream_path)
+    if [[ -z "${bit}" ]]; then
+        print_error "No bitstream found for panel ${PANEL}"
+        print_warning "Run './build.sh bitstream' or './build.sh build-all' first"
         exit 1
     fi
 
-    print_step "Loading bitstream to SRAM via ${CABLE}"
+    local rel_bit="${bit#${SCRIPT_DIR}/}"
+    print_step "Loading ${rel_bit} to SRAM via ${CABLE} (panel: ${PANEL})"
     print_warning "This is temporary - configuration will be lost on power cycle"
 
-    docker_run_usb "openFPGALoader --cable ${CABLE} /project/${BITSTREAM}"
+    docker_run_usb "openFPGALoader --cable ${CABLE} /project/${rel_bit}"
 
     print_success "Bitstream loaded to SRAM"
 }
@@ -181,50 +225,43 @@ program_flash() {
     print_header "Programming FPGA (Flash - Persistent)"
     check_docker_image
 
-    if [[ ! -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
-        print_error "Bitstream not found: ${BITSTREAM}"
-        print_warning "Run './build.sh bitstream' first"
+    local bit=$(get_bitstream_path)
+    if [[ -z "${bit}" ]]; then
+        print_error "No bitstream found for panel ${PANEL}"
+        print_warning "Run './build.sh bitstream' or './build.sh build-all' first"
         exit 1
     fi
 
-    print_step "Flashing bitstream to SPI flash via ${CABLE}"
+    local rel_bit="${bit#${SCRIPT_DIR}/}"
+    print_step "Flashing ${rel_bit} to SPI flash via ${CABLE} (panel: ${PANEL})"
     print_warning "This will persist across power cycles"
 
-    docker_run_usb "openFPGALoader --board colorlight --cable ${CABLE} -f --unprotect-flash /project/${BITSTREAM}"
+    docker_run_usb "openFPGALoader --board colorlight --cable ${CABLE} -f --unprotect-flash /project/${rel_bit}"
 
     print_success "Bitstream written to flash"
 }
 
-stop_tftp() {
+is_tftp_running() {
     if [[ -f "${TFTP_DIR}/dnsmasq.pid" ]]; then
-        OLD_PID=$(cat "${TFTP_DIR}/dnsmasq.pid" 2>/dev/null)
-        if [[ -n "${OLD_PID}" ]] && kill -0 "${OLD_PID}" 2>/dev/null; then
-            print_step "Stopping TFTP server (PID ${OLD_PID})"
-            sudo kill "${OLD_PID}" 2>/dev/null || true
-            rm -f "${TFTP_DIR}/dnsmasq.pid"
-            sleep 1
+        local pid=$(cat "${TFTP_DIR}/dnsmasq.pid" 2>/dev/null)
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            return 0
         fi
+    fi
+    return 1
+}
+
+stop_tftp() {
+    if is_tftp_running; then
+        local pid=$(cat "${TFTP_DIR}/dnsmasq.pid" 2>/dev/null)
+        print_step "Stopping TFTP server (PID ${pid})"
+        sudo kill "${pid}" 2>/dev/null || true
+        rm -f "${TFTP_DIR}/dnsmasq.pid"
+        sleep 1
     fi
 }
 
-prepare_tftp() {
-    if [[ ! -f "${SCRIPT_DIR}/${FIRMWARE_BIN}" ]]; then
-        print_error "Firmware not found: ${FIRMWARE_BIN}"
-        print_warning "Run './build.sh firmware' first"
-        exit 1
-    fi
-
-    # Create TFTP directory
-    mkdir -p "${TFTP_DIR}"
-
-    # Convert ELF to raw binary for BIOS
-    print_step "Converting ELF to raw binary"
-    docker_run "riscv-none-elf-objcopy -O binary /project/${FIRMWARE_BIN} /project/.tftp/boot.bin"
-
-    local size=$(ls -lh "${TFTP_DIR}/boot.bin" | awk '{print $5}')
-    print_step "Created ${TFTP_DIR}/boot.bin (${size})"
-
-    # Auto-detect host IP if not specified
+detect_host_ip() {
     if [[ -z "${HOST_IP}" ]]; then
         HOST_IP=$(ip -4 addr show | grep -oP '10\.11\.6\.\d+' | head -1)
         if [[ -z "${HOST_IP}" ]]; then
@@ -235,20 +272,31 @@ prepare_tftp() {
             exit 1
         fi
     fi
-    print_step "Host IP: ${HOST_IP}"
-
-    # Check if dnsmasq is available
-    if ! command -v dnsmasq &> /dev/null; then
-        print_error "dnsmasq is not installed"
-        echo "Install with: sudo dnf install dnsmasq  # Fedora"
-        echo "          or: sudo apt install dnsmasq  # Ubuntu/Debian"
-        exit 1
-    fi
 }
 
-start_tftp_background() {
-    stop_tftp
+ensure_tftp() {
+    # Already running — nothing to do
+    if is_tftp_running; then
+        local pid=$(cat "${TFTP_DIR}/dnsmasq.pid" 2>/dev/null)
+        print_step "TFTP server already running (PID ${pid})"
+        return 0
+    fi
 
+    # Need boot.bin to serve
+    if [[ ! -f "${TFTP_DIR}/boot.bin" ]]; then
+        print_warning "No boot.bin — skipping TFTP server"
+        return 1
+    fi
+
+    # Check dnsmasq is installed
+    if ! command -v dnsmasq &> /dev/null; then
+        print_warning "dnsmasq not installed — skipping TFTP server"
+        return 1
+    fi
+
+    detect_host_ip
+
+    mkdir -p "${TFTP_DIR}"
     print_step "Starting TFTP server on ${HOST_IP}"
     sudo dnsmasq --port=0 --enable-tftp \
         --tftp-root="${TFTP_DIR}" --listen-address="${HOST_IP}" \
@@ -256,43 +304,24 @@ start_tftp_background() {
         --pid-file="${TFTP_DIR}/dnsmasq.pid"
 
     sleep 1
-    if [[ -f "${TFTP_DIR}/dnsmasq.pid" ]]; then
+    if is_tftp_running; then
         print_success "TFTP server started (PID $(cat ${TFTP_DIR}/dnsmasq.pid))"
     else
-        print_error "Failed to start TFTP server"
-        exit 1
+        print_warning "Could not start TFTP server (run manually: ./build.sh start)"
+        return 1
     fi
-}
-
-start_tftp() {
-    print_header "Starting TFTP Server"
-
-    prepare_tftp
-    stop_tftp
-
-    print_step "Starting TFTP server on ${HOST_IP}"
-    print_warning "This requires sudo for dnsmasq"
-
-    echo ""
-    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  TFTP server running on ${HOST_IP}${NC}"
-    echo -e "${GREEN}  Serving: ${TFTP_DIR}/boot.bin${NC}"
-    echo -e "${GREEN}  Press Ctrl+C to stop${NC}"
-    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
-    echo ""
-
-    sudo dnsmasq --no-daemon --port=0 --enable-tftp \
-        --tftp-root="${TFTP_DIR}" --listen-address="${HOST_IP}" \
-        --log-queries --log-facility=-
 }
 
 do_boot() {
     print_header "Boot Sequence (SRAM + TFTP)"
 
-    prepare_tftp
+    if [[ ! -f "${TFTP_DIR}/boot.bin" ]]; then
+        print_error "No boot.bin found. Run './build.sh firmware' first."
+        exit 1
+    fi
 
-    # Start TFTP server in background FIRST
-    start_tftp_background
+    # Ensure TFTP server is running BEFORE programming SRAM
+    ensure_tftp
 
     # Program SRAM (this triggers the board to request boot.bin)
     echo ""
@@ -329,9 +358,8 @@ do_boot() {
         print_warning "Board not responding to ping (may need more time)"
     fi
 
-    # Keep TFTP server running — firmware fetches config after DHCP
     echo ""
-    print_success "Boot complete (TFTP server still running for config — './build.sh stop' to stop)"
+    print_success "Boot complete (TFTP server stays running — './build.sh stop' to stop)"
 }
 
 do_stop() {
@@ -341,45 +369,8 @@ do_stop() {
 }
 
 do_start() {
-    print_header "Starting TFTP Server"
-
-    if [[ ! -f "${TFTP_DIR}/boot.bin" ]]; then
-        print_error "No boot.bin found. Run './build.sh firmware' first."
-        exit 1
-    fi
-
-    # Auto-detect host IP if not specified
-    if [[ -z "${HOST_IP}" ]]; then
-        HOST_IP=$(ip -4 addr show | grep -oP '10\.11\.6\.\d+' | head -1)
-        if [[ -z "${HOST_IP}" ]]; then
-            HOST_IP=$(ip -4 addr show | grep -oP 'inet \K[\d.]+' | grep -v '^127\.' | head -1)
-        fi
-        if [[ -z "${HOST_IP}" ]]; then
-            print_error "Could not auto-detect host IP. Use --host-ip option."
-            exit 1
-        fi
-    fi
-
-    stop_tftp
-
-    print_step "Host IP: ${HOST_IP}"
-    print_step "Serving: ${TFTP_DIR}/boot.bin"
-
-    sudo dnsmasq --port=0 --enable-tftp \
-        --tftp-root="${TFTP_DIR}" --listen-address="${HOST_IP}" \
-        --log-queries --log-facility="${TFTP_DIR}/dnsmasq.log" \
-        --pid-file="${TFTP_DIR}/dnsmasq.pid"
-
-    sleep 1
-    if [[ -f "${TFTP_DIR}/dnsmasq.pid" ]]; then
-        print_success "TFTP server running (PID $(cat ${TFTP_DIR}/dnsmasq.pid))"
-        echo ""
-        echo "Power cycle the board to load firmware."
-        echo "Run './build.sh stop' when done."
-    else
-        print_error "Failed to start TFTP server"
-        exit 1
-    fi
+    print_header "TFTP Server"
+    ensure_tftp
 }
 
 build_all() {
@@ -404,23 +395,32 @@ USAGE:
 
 TARGETS:
     docker          Build the Docker build environment
-    bitstream       Build the FPGA bitstream (gateware)
-    firmware        Build the Rust firmware
+    bitstream       Build FPGA bitstream for current --panel (saved to bitstreams/)
+    build-all       Build bitstreams for ALL panel sizes + firmware
+    firmware        Build the Rust firmware (auto-starts TFTP server)
     pac             Regenerate the Peripheral Access Crate (after SoC changes)
-    sram            Program FPGA via JTAG (temporary, SRAM)
-    flash           Program FPGA via JTAG (persistent, SPI flash)
-    tftp            Start TFTP server to serve firmware (for network boot)
-    boot            Combined: program SRAM + start TFTP server
+    sram            Program FPGA via JTAG (temporary, uses --panel to select bitstream)
+    flash           Program FPGA via JTAG (persistent, uses --panel to select bitstream)
+    boot            Combined: program SRAM + ensure TFTP server
+    start           Start TFTP server (if not already running)
+    stop            Stop the background TFTP server
     all             Build docker (if needed), bitstream, and firmware
 
     If no target is specified, 'all' is assumed.
+
+    The TFTP server is started automatically when boot.bin is available
+    (after 'firmware' or 'boot'). It stays running in the background
+    and is not restarted if already running. Use 'stop' to shut it down.
+
+    Firmware is universal — one binary works for all panel sizes.
+    Only bitstreams differ. Use 'build-all' to pre-build all panels.
 
 OPTIONS:
     -h, --help              Show this help message
     -r, --revision REV      Board revision (default: 8.2)
     -i, --ip IP             IP address for firmware (default: 10.11.6.250)
     -c, --cable CABLE       JTAG cable type (default: usb-blaster)
-    -p, --panel PANEL       Panel type: 128x64, 96x48, 64x32, 64x64 (default: 96x48)
+    -p, --panel PANEL       Panel type: 128x64, 96x48, 64x32, 64x64 (default: 128x64)
     -t, --pattern PATTERN   Test pattern: grid, rainbow, solid_white, solid_red,
                             solid_green, solid_blue (default: grid)
     --host-ip IP            Host IP for TFTP server (auto-detected if not set)
@@ -430,23 +430,17 @@ EXAMPLES:
     # Build everything (docker image if needed, bitstream, firmware)
     ./build.sh
 
-    # Build only the Docker image
-    ./build.sh docker
+    # Build bitstreams for ALL panel sizes + firmware
+    ./build.sh build-all
 
-    # Build bitstream for a specific panel type
-    ./build.sh --panel 128x64 bitstream
+    # Flash a specific panel's bitstream (no rebuild needed)
+    ./build.sh --panel 96x48 flash
 
-    # Build firmware with rainbow test pattern
-    ./build.sh --pattern rainbow firmware boot
+    # Build and boot a specific panel
+    ./build.sh --panel 64x32 bitstream boot
 
-    # Build bitstream with custom IP
-    ./build.sh --ip 192.168.1.100 bitstream
-
-    # Build and program to SRAM for testing
-    ./build.sh bitstream sram
-
-    # Full build and flash
-    ./build.sh all flash
+    # Rebuild firmware only (universal, works with all panels)
+    ./build.sh firmware
 
     # Regenerate PAC after modifying colorlight.py
     ./build.sh pac firmware
@@ -460,11 +454,9 @@ WORKFLOW:
     1. First time setup:
        ./build.sh docker
 
-    2. Development cycle (rev 8.2 requires TFTP boot):
+    2. Development cycle:
        ./build.sh firmware boot
-       # This programs SRAM and starts TFTP server
-       # Press Ctrl+C after firmware boots to stop TFTP
-       # Test via telnet
+       # TFTP server auto-starts and stays running
        telnet 10.11.6.250 23
 
     3. Full rebuild and test:
@@ -475,6 +467,9 @@ WORKFLOW:
 
     5. After modifying colorlight.py (SoC changes):
        ./build.sh bitstream pac firmware
+
+    6. Stop TFTP server when done:
+       ./build.sh stop
 
 TROUBLESHOOTING:
     - If 'sram' or 'flash' fails with permission errors:
@@ -488,7 +483,7 @@ TROUBLESHOOTING:
 
 For more information, see:
     - README.md      Project overview and quick start
-    - CLAUDE.md      Development notes and debugging tips
+    - ARCH.md        Architecture and internals
     - CHANGELOG.md   Version history
 
 EOF
@@ -569,8 +564,12 @@ for target in "${TARGETS[@]}"; do
         bitstream|gateware|bit)
             build_bitstream
             ;;
+        build-all)
+            build_all_panels
+            ;;
         firmware|rust|fw)
             build_firmware
+            ensure_tftp
             ;;
         pac)
             build_pac
@@ -581,17 +580,14 @@ for target in "${TARGETS[@]}"; do
         flash|program)
             program_flash
             ;;
-        tftp|serve)
-            start_tftp
+        tftp|serve|start)
+            do_start
             ;;
         boot)
             do_boot
             ;;
         stop)
             do_stop
-            ;;
-        start)
-            do_start
             ;;
         all)
             build_all

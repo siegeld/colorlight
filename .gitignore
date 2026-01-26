@@ -16,6 +16,7 @@ barsign-disp-flash.bin
 # Pre-built binaries (kept in repo for flashing without rebuilding)
 !barsign-disp.bin
 !colorlight.bit
+!bitstreams/*.bit
 
 # -----------------------------------------------------------------------------
 # LiteX Dependencies (use Docker build environment)
