@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.1.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -119,7 +119,7 @@ colorlight/
 ├── sw_rust/               # Rust firmware
 │   ├── barsign_disp/      # Main application
 │   ├── litex-pac/         # Peripheral Access Crate
-│   └── smoltcp-0.8.0/     # Patched smoltcp (DHCP siaddr support)
+│   └── smoltcp-0.8.0/     # Patched smoltcp (DHCP siaddr + Option 66)
 ├── tools/                 # Python tools for sending content to the panel
 ├── .tftp/                 # TFTP-served config files (<mac>.yml)
 ├── legacy/                # Old scripts and experiments
@@ -215,7 +215,7 @@ The firmware acquires its IP address via DHCP at boot. If no DHCP server respond
 
 ### Panel Layout (TFTP Boot Config)
 
-At boot, the firmware fetches a per-board YAML config file from the TFTP server (the DHCP `siaddr`). The filename is the board's MAC address: e.g., `02-78-7b-21-ae-53.yml`.
+At boot, the firmware fetches a per-board YAML config file from the TFTP server (discovered via DHCP — see [TFTP Server IP](#tftp-server-ip)). The filename is the board's MAC address: e.g., `02-78-7b-21-ae-53.yml`.
 
 Example config for a single 128x64 panel:
 
@@ -262,16 +262,20 @@ telnet <board-ip> 23
 
 The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot. The TFTP server is started automatically by `./build.sh boot` and stays running in the background. Use `./build.sh start` / `./build.sh stop` to manage it manually.
 
-### TFTP Server IP (Hardcoded)
+### TFTP Server IP
 
-Both TFTP fetches currently use a **hardcoded server IP of `10.11.6.65`**:
+The firmware discovers the TFTP server address from DHCP, with a hardcoded fallback:
+
+- **Firmware `<mac>.yml` config fetch** — Uses the DHCP server IP in this priority order:
+  1. `siaddr` (DHCP header "next server" field)
+  2. DHCP Option 66 (TFTP Server Name — parsed as dotted-decimal IP)
+  3. Hardcoded fallback: `10.11.6.65`
+
+  Configure your DHCP server to provide the TFTP server address. For **Windows DHCP Server**, set **Option 066** (Boot Server Host Name) on the scope to the TFTP server's IP. For **dnsmasq**, use `dhcp-boot=boot.bin,,<ip>`.
+
+  The web status page shows the active boot server and how it was discovered (siaddr, option 66, or fallback).
 
 - **BIOS `boot.bin` fetch** — The LiteX BIOS has the TFTP server IP baked into the bitstream at build time via the `remote_ip` parameter in `gateware/colorlight.py`. It does not use DHCP.
-- **Firmware `<mac>.yml` config fetch** — The Rust firmware also uses a hardcoded TFTP server IP for fetching per-board YAML config files at boot.
-
-This means your TFTP server **must** be running at `10.11.6.65`. The `--host-ip` flag in `build.sh` controls which local interface dnsmasq binds to, but the board will only send requests to the address compiled into the bitstream/firmware.
-
-**TODO:** Make the TFTP server IP configurable. The BIOS fetch could use a `--remote-ip` build flag. The firmware fetch should use the DHCP `siaddr` field (the patched smoltcp already exposes it as `Config.server_ip`).
 
 ## Pre-built Binaries
 
@@ -297,7 +301,7 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 ## Known Issues
 
 - **Art-Net**: Palette updates work, direct pixel writes commented out
-- **TFTP server IP**: Hardcoded to `10.11.6.65` in both BIOS and firmware (see [TFTP Server IP](#tftp-server-ip-hardcoded))
+- **BIOS TFTP server IP**: Hardcoded to `10.11.6.65` in the BIOS bitstream (firmware TFTP is now dynamic via DHCP)
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and fixes.
 

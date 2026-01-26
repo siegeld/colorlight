@@ -35,6 +35,19 @@ pub enum Animation {
     Rainbow { phase: u32 },
 }
 
+/// How the TFTP boot server address was determined.
+#[derive(Clone, Copy)]
+pub enum BootServerSource {
+    /// Not yet known (DHCP hasn't completed).
+    None,
+    /// DHCP `siaddr` header field.
+    Siaddr,
+    /// DHCP Option 66 (TFTP Server Name).
+    Option66,
+    /// Hardcoded fallback.
+    Fallback,
+}
+
 pub struct Context {
     pub output: Output,
     pub hub75: Hub75,
@@ -46,6 +59,8 @@ pub struct Context {
     pub bitmap_stats: BitmapStats,
     pub layout: LayoutConfig,
     pub reboot_pending: bool,
+    /// TFTP boot server IP and how it was discovered.
+    pub boot_server: Option<([u8; 4], BootServerSource)>,
 }
 
 impl Context {

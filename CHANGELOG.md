@@ -8,9 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Replace hardcoded TFTP server IP with DHCP `siaddr` (patched smoltcp exposes it)
 - Re-enable Art-Net direct pixel writes
 - Add serial console support documentation
+
+---
+
+## [1.2.0] - 2026-01-26
+
+### Added
+- **Dynamic TFTP server discovery** — Firmware now discovers the TFTP server address from DHCP instead of using a hardcoded IP. Priority: `siaddr` header field → DHCP Option 66 → fallback `10.11.6.65`
+- **DHCP Option 66 parsing** — Patched smoltcp to parse DHCP Option 66 (TFTP Server Name) as a dotted-decimal IP address; the DHCP client now requests Option 66 in its parameter request list
+- **Boot server in web GUI** — Status page shows the active TFTP server IP and how it was discovered (siaddr, option 66, or fallback)
+
+### Changed
+- **smoltcp DHCP `Config`** — Now exposes both `server_ip` (siaddr) and `tftp_server_name` (Option 66) separately so firmware can distinguish the source
+- **DHCP parameter request list** — Added Option 66 so DHCP servers (especially Windows DHCP Server) include it in responses
 
 ---
 
@@ -247,6 +259,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.2.0 | 2026-01-26 | Dynamic TFTP server via DHCP siaddr/Option 66 |
 | 1.1.0 | 2026-01-26 | Web reboot button, modern dark theme, build.sh TFTP fix |
 | 1.0.0 | 2026-01-26 | First stable release: multi-panel build, auto TFTP, repo cleanup |
 | 0.2.9 | 2026-01-25 | Video streaming, 4 RX slots, fast bitmap receive |

@@ -2,7 +2,7 @@
 
 use core::fmt::Write;
 use crate::hub75::OutputMode;
-use crate::menu::{Animation, Context};
+use crate::menu::{Animation, BootServerSource, Context};
 
 // ── Request Parser ──────────────────────────────────────────────
 
@@ -213,6 +213,21 @@ li{{padding:2px 0}}\
     write!(resp, "<tr><td>Animation</td><td>{}</td></tr>", anim).ok();
     write!(resp, "<tr><td>Bitmap frames</td><td>{}</td></tr>",
         ctx.bitmap_stats.frames_completed).ok();
+    match ctx.boot_server {
+        Some((ip, source)) => {
+            let src = match source {
+                BootServerSource::None => "unknown",
+                BootServerSource::Siaddr => "siaddr",
+                BootServerSource::Option66 => "option 66",
+                BootServerSource::Fallback => "fallback",
+            };
+            write!(resp, "<tr><td>Boot server</td><td>{}.{}.{}.{} ({})</td></tr>",
+                ip[0], ip[1], ip[2], ip[3], src).ok();
+        }
+        None => {
+            write!(resp, "<tr><td>Boot server</td><td>-</td></tr>").ok();
+        }
+    }
     write!(resp, "</table><h3>Panels</h3><table>").ok();
     for (i, a) in l.assignments.iter().enumerate() {
         match a {

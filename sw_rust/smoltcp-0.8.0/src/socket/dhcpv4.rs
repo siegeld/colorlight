@@ -25,6 +25,7 @@ const PARAMETER_REQUEST_LIST: &[u8] = &[
     dhcpv4_field::OPT_SUBNET_MASK,
     dhcpv4_field::OPT_ROUTER,
     dhcpv4_field::OPT_DOMAIN_NAME_SERVER,
+    dhcpv4_field::OPT_TFTP_SERVER_NAME,
 ];
 
 /// IPv4 configuration data provided by the DHCP server.
@@ -38,9 +39,10 @@ pub struct Config {
     pub router: Option<Ipv4Address>,
     /// DNS servers
     pub dns_servers: [Option<Ipv4Address>; DHCP_MAX_DNS_SERVER_COUNT],
-    /// TFTP server address (siaddr field from DHCP header).
-    /// This is the "next server" address used for network boot.
+    /// TFTP server address from the DHCP `siaddr` header field.
     pub server_ip: Option<Ipv4Address>,
+    /// TFTP server address from DHCP Option 66 (parsed from ASCII).
+    pub tftp_server_name: Option<Ipv4Address>,
 }
 
 /// Information on how to reach a DHCP server.
@@ -369,6 +371,7 @@ impl Dhcpv4Socket {
             router: dhcp_repr.router,
             dns_servers: dns_servers,
             server_ip,
+            tftp_server_name: dhcp_repr.tftp_server_name,
         };
 
         // RFC 2131 indicates clients should renew a lease halfway through its expiration.
@@ -426,6 +429,7 @@ impl Dhcpv4Socket {
             max_size: Some((cx.ip_mtu() - MAX_IPV4_HEADER_LEN - UDP_HEADER_LEN) as u16),
             lease_duration: None,
             dns_servers: None,
+            tftp_server_name: None,
         };
 
         let udp_repr = UdpRepr {
@@ -736,6 +740,7 @@ mod test {
         dns_servers: None,
         max_size: None,
         lease_duration: None,
+        tftp_server_name: None,
     };
 
     const DHCP_DISCOVER: DhcpRepr = DhcpRepr {
@@ -824,6 +829,7 @@ mod test {
                 dns_servers: DNS_IPS,
                 router: Some(SERVER_IP),
                 server_ip: Some(SERVER_IP),
+                tftp_server_name: None,
             },
             server: ServerInfo {
                 address: SERVER_IP,
@@ -855,6 +861,7 @@ mod test {
                 dns_servers: DNS_IPS,
                 router: Some(SERVER_IP),
                 server_ip: Some(SERVER_IP),
+                tftp_server_name: None,
             }))
         );
 

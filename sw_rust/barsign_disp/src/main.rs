@@ -181,6 +181,7 @@ fn main() -> ! {
         bitmap_stats: bitmap_udp::BitmapStats::new(),
         layout: LayoutConfig::single_panel(96, 48),
         reboot_pending: false,
+        boot_server: None,
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
@@ -268,9 +269,17 @@ fn main() -> ! {
                         if let Some(router) = config.router {
                             iface.routes_mut().add_default_ipv4_route(router).ok();
                         }
-                        // Start TFTP config load from build host
+                        // Start TFTP config load — prefer siaddr, then option 66, then fallback
                         {
-                            let server = Ipv4Address([10, 11, 6, 65]);
+                            use crate::menu::BootServerSource;
+                            let (server, source) = if let Some(ip) = config.server_ip {
+                                (ip, BootServerSource::Siaddr)
+                            } else if let Some(ip) = config.tftp_server_name {
+                                (ip, BootServerSource::Option66)
+                            } else {
+                                (Ipv4Address([10, 11, 6, 65]), BootServerSource::Fallback)
+                            };
+                            r.context.boot_server = Some((server.0, source));
                             if !tftp_loader.is_active() && !tftp_loader.is_done() {
                                 // Build MAC-based filename: 02-78-7b-21-ae-53.yml
                                 let m = &r.context.mac;

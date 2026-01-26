@@ -58,11 +58,14 @@ Set `remote_ip="255.255.255.255"` in `gateware/colorlight.py`. The BIOS will bro
 tftp-port-range=6969,6969
 ```
 
-### 2. DHCP `siaddr` / Option 66 (Firmware)
+### 2. DHCP `siaddr` / Option 66 (Firmware) — ✅ DONE (v1.2.0)
 
-The patched smoltcp already exposes the DHCP server IP as `Config.server_ip` (the `siaddr` field from the DHCP response). The firmware just needs to use this value instead of the hardcoded IP when fetching `<mac>.yml`.
+Implemented in v1.2.0. The firmware now discovers the TFTP server from DHCP with priority: `siaddr` → Option 66 → hardcoded fallback `10.11.6.65`.
 
-DHCP option 66 (TFTP Server Name) is the standard alternative. Most DHCP servers support both.
+- smoltcp patched to parse Option 66 (ASCII dotted-decimal IP) and request it in the DHCP parameter request list
+- `Config` exposes both `server_ip` (siaddr) and `tftp_server_name` (Option 66) separately
+- Web status page shows boot server IP and discovery source
+- Works with Windows DHCP Server (Option 066) and dnsmasq (`dhcp-boot`)
 
 **dnsmasq config:**
 ```
@@ -71,7 +74,7 @@ dhcp-boot=boot.bin,,10.11.6.65    # sets siaddr
 dhcp-option=66,"10.11.6.65"       # option 66
 ```
 
-**Code change:** In `main.rs`, replace the hardcoded `Ipv4Address([10, 11, 6, 65])` with `config.server_ip` from the DHCP event.
+**Windows DHCP Server:** Set Option 066 (Boot Server Host Name) on the scope to the TFTP server's IP.
 
 ### 3. Fix Flash Boot (Eliminate BIOS TFTP)
 

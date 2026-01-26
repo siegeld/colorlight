@@ -13,6 +13,42 @@ pub const MAX_DNS_SERVER_COUNT: usize = 3;
 
 const DHCP_MAGIC_NUMBER: u32 = 0x63825363;
 
+/// Parse an ASCII dotted-decimal IPv4 address (e.g. b"10.11.6.65").
+/// Returns `None` on any malformed input.
+fn parse_ipv4_ascii(s: &[u8]) -> Option<Ipv4Address> {
+    let mut octets = [0u8; 4];
+    let mut octet_idx = 0;
+    let mut acc: u16 = 0;
+    let mut digits = 0;
+    for &b in s {
+        if b == b'.' {
+            if digits == 0 || octet_idx >= 3 {
+                return None;
+            }
+            if acc > 255 {
+                return None;
+            }
+            octets[octet_idx] = acc as u8;
+            octet_idx += 1;
+            acc = 0;
+            digits = 0;
+        } else if b >= b'0' && b <= b'9' {
+            acc = acc * 10 + (b - b'0') as u16;
+            digits += 1;
+            if digits > 3 {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    }
+    if digits == 0 || octet_idx != 3 || acc > 255 {
+        return None;
+    }
+    octets[3] = acc as u8;
+    Some(Ipv4Address(octets))
+}
+
 enum_with_unknown! {
     /// The possible opcodes of a DHCP packet.
     pub enum OpCode(u8) {
@@ -704,6 +740,8 @@ pub struct Repr<'a> {
     pub max_size: Option<u16>,
     /// The DHCP IP lease duration, specified in seconds.
     pub lease_duration: Option<u32>,
+    /// TFTP server address parsed from Option 66 (ASCII dotted-decimal IP).
+    pub tftp_server_name: Option<Ipv4Address>,
 }
 
 impl<'a> Repr<'a> {
@@ -780,6 +818,7 @@ impl<'a> Repr<'a> {
         let mut dns_servers = None;
         let mut max_size = None;
         let mut lease_duration = None;
+        let mut tftp_server_name = None;
 
         let mut options = packet.options()?;
         while !options.is_empty() {
@@ -833,6 +872,21 @@ impl<'a> Repr<'a> {
                     }
                     dns_servers = Some(servers);
                 }
+                DhcpOption::Other {
+                    kind: field::OPT_TFTP_SERVER_NAME,
+                    data,
+                } => {
+                    // Option 66: ASCII dotted-decimal IP, e.g. "10.11.6.65"
+                    // Strip trailing NUL if present.
+                    let s = if data.last() == Some(&0) {
+                        &data[..data.len() - 1]
+                    } else {
+                        data
+                    };
+                    if let Some(ip) = parse_ipv4_ascii(s) {
+                        tftp_server_name = Some(ip);
+                    }
+                }
                 DhcpOption::Other { .. } => {}
             }
             options = next_options;
@@ -857,6 +911,7 @@ impl<'a> Repr<'a> {
             dns_servers,
             max_size,
             lease_duration,
+            tftp_server_name,
             message_type: message_type?,
         })
     }
@@ -1135,6 +1190,7 @@ mod test {
             dns_servers: None,
             max_size: None,
             lease_duration: Some(0xffff_ffff), // Infinite lease
+            tftp_server_name: None,
         }
     }
 
@@ -1157,6 +1213,7 @@ mod test {
             server_identifier: None,
             parameter_request_list: Some(&[1, 3, 6, 42]),
             dns_servers: None,
+            tftp_server_name: None,
         }
     }
 
