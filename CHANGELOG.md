@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-01-26
+
+### Added
+- **Web reboot button** — New "System" section on status page with a Reboot button that triggers a full SoC reset via `POST /api/reboot`; response is sent before reset fires
+- **Modern dark theme** — Status page restyled with dark navy background, system font, styled tables/buttons, responsive viewport meta tag
+- **Higher contrast text** — Body text `#eee`, label column `#aaa`, 16px font for readability
+
+### Changed
+- **`./build.sh firmware` no longer starts TFTP server** — Build and serve are now separate concerns; use `./build.sh start` or `./build.sh boot` for TFTP
+- **HTTP response buffer** — Increased from 2048 to 2560 bytes to accommodate the new CSS
+
+---
+
 ## [1.0.0] - 2026-01-26
 
 First stable release. All core features working and tested.
@@ -234,6 +247,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.1.0 | 2026-01-26 | Web reboot button, modern dark theme, build.sh TFTP fix |
 | 1.0.0 | 2026-01-26 | First stable release: multi-panel build, auto TFTP, repo cleanup |
 | 0.2.9 | 2026-01-25 | Video streaming, 4 RX slots, fast bitmap receive |
 | 0.2.8 | 2026-01-25 | Web pattern selector, JTAG pinout docs |

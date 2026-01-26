@@ -112,7 +112,7 @@ impl HttpRequest {
 // ── Response Writer ─────────────────────────────────────────────
 
 pub struct HttpResponse {
-    pub data: heapless::Vec<u8, 2048>,
+    pub data: heapless::Vec<u8, 2560>,
 }
 
 impl HttpResponse {
@@ -166,6 +166,7 @@ pub fn handle_request(req: &HttpRequest, resp: &mut HttpResponse, ctx: &mut Cont
         (Method::Post, "/api/display/off")     => api_display_off(resp, ctx),
         (Method::Post, "/api/display/pattern") => api_display_pattern(req, resp, ctx),
         (Method::Get, "/api/bitmap/stats")     => api_bitmap_stats(resp, ctx),
+        (Method::Post, "/api/reboot")          => api_reboot(resp, ctx),
         _                                      => resp.not_found(),
     }
 }
@@ -184,10 +185,22 @@ fn page_status(resp: &mut HttpResponse, ctx: &mut Context, ip: [u8; 4]) {
     };
     write!(resp, "\
 <!DOCTYPE html><html><head>\
-<meta charset=utf-8><link rel=icon href='data:,'>\
+<meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>\
+<link rel=icon href='data:,'>\
 <title>Colorlight</title>\
-<style>body{{font:14px monospace;margin:20px}}td{{padding:2px 8px}}</style>\
-</head><body><h2>Colorlight Status</h2><table>").ok();
+<style>\
+body{{font:16px/1.6 system-ui,sans-serif;background:#1a1a2e;color:#eee;padding:20px;max-width:520px;margin:0 auto}}\
+h2{{color:#fff;margin:0 0 14px;border-bottom:2px solid #333;padding-bottom:8px}}\
+h3{{color:#888;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px}}\
+table{{width:100%;border-collapse:collapse}}\
+td{{padding:5px 10px;border-bottom:1px solid #282840}}\
+td:first-child{{color:#aaa}}\
+select,button{{font:inherit;background:#282840;color:#eee;border:1px solid #444;padding:5px 10px;border-radius:4px}}\
+button{{background:#5858e0;color:#fff;border:0}}\
+a{{color:#78f}}\
+ul{{list-style:none;padding:0}}\
+li{{padding:2px 0}}\
+</style></head><body><h2>Colorlight Status</h2><table>").ok();
     write!(resp, "<tr><td>MAC</td><td>{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}</td></tr>",
         m[0], m[1], m[2], m[3], m[4], m[5]).ok();
     write!(resp, "<tr><td>IP</td><td>{}.{}.{}.{}</td></tr>",
@@ -225,6 +238,8 @@ fn page_status(resp: &mut HttpResponse, ctx: &mut Context, ip: [u8; 4]) {
 body:JSON.stringify({{name:document.getElementById('pat').value}})}}).then(r=>r.json()).then(j=>{{document.getElementById('msg').textContent=j.ok?'Loaded!':'Error'}}\
 ).catch(()=>{{document.getElementById('msg').textContent='Failed'}})\">Load</button> \
 <span id=msg></span>\
+<h3>System</h3>\
+<button onclick=\"fetch('/api/reboot',{{method:'POST'}});this.textContent='Rebooting...';this.disabled=true\">Reboot</button>\
 <h3>API</h3><ul>\
 <li><a href=/api/status>/api/status</a></li>\
 <li><a href=/api/layout>/api/layout</a></li>\
@@ -391,6 +406,12 @@ fn api_bitmap_stats(resp: &mut HttpResponse, ctx: &Context) {
     write!(resp, r#""last_chunk":"{}/{}","last_size":"{}x{}","last_data_len":{}}}"#,
         s.last_chunk_index, s.last_total_chunks,
         s.last_width, s.last_height, s.last_data_len).ok();
+}
+
+fn api_reboot(resp: &mut HttpResponse, ctx: &mut Context) {
+    ctx.reboot_pending = true;
+    resp.ok_json();
+    write!(resp, r#"{{"ok":true,"rebooting":true}}"#).ok();
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

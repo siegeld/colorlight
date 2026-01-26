@@ -180,6 +180,7 @@ fn main() -> ! {
         debug: false,
         bitmap_stats: bitmap_udp::BitmapStats::new(),
         layout: LayoutConfig::single_panel(96, 48),
+        reboot_pending: false,
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
@@ -497,6 +498,11 @@ fn main() -> ! {
                     if http_response_sent[i] >= http_responses[i].data.len() && http_responses[i].data.len() > 0 {
                         socket.close();
                         http_close_at[i] = time_ms + 50;
+                        if r.context.reboot_pending {
+                            // Allow TCP FIN to transmit before resetting
+                            for _ in 0..100_000 { unsafe { core::arch::asm!("nop") }; }
+                            unsafe { (*litex_pac::Ctrl::ptr()).reset().write(|w| w.soc_rst().set_bit()) };
+                        }
                     }
                 }
             }

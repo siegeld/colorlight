@@ -397,7 +397,7 @@ TARGETS:
     docker          Build the Docker build environment
     bitstream       Build FPGA bitstream for current --panel (saved to bitstreams/)
     build-all       Build bitstreams for ALL panel sizes + firmware
-    firmware        Build the Rust firmware (auto-starts TFTP server)
+    firmware        Build the Rust firmware
     pac             Regenerate the Peripheral Access Crate (after SoC changes)
     sram            Program FPGA via JTAG (temporary, uses --panel to select bitstream)
     flash           Program FPGA via JTAG (persistent, uses --panel to select bitstream)
@@ -408,9 +408,9 @@ TARGETS:
 
     If no target is specified, 'all' is assumed.
 
-    The TFTP server is started automatically when boot.bin is available
-    (after 'firmware' or 'boot'). It stays running in the background
-    and is not restarted if already running. Use 'stop' to shut it down.
+    The TFTP server is started automatically by 'boot'. It stays running
+    in the background and is not restarted if already running. Use 'stop'
+    to shut it down, or 'start' to launch it manually.
 
     Firmware is universal — one binary works for all panel sizes.
     Only bitstreams differ. Use 'build-all' to pre-build all panels.
@@ -569,7 +569,6 @@ for target in "${TARGETS[@]}"; do
             ;;
         firmware|rust|fw)
             build_firmware
-            ensure_tftp
             ;;
         pac)
             build_pac

@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -74,7 +74,8 @@ All builds use Docker for reproducibility. Run `./build.sh --help` for full opti
 ./build.sh --panel 96x48 flash      # flash a specific panel
 ./build.sh boot                     # program SRAM + TFTP boot
 
-# TFTP server auto-starts after firmware build; stop manually:
+# Start TFTP server manually when needed:
+./build.sh start
 ./build.sh stop
 ```
 
@@ -259,7 +260,7 @@ telnet <board-ip> 23
 4. **Config fetch** — Firmware fetches `<mac>.yml` from the TFTP server (see note below)
 5. **Layout applied** — Panel grid configured and display redrawn
 
-The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot. The TFTP server is started automatically by `./build.sh firmware` or `./build.sh boot` and stays running in the background. Use `./build.sh stop` to shut it down.
+The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot. The TFTP server is started automatically by `./build.sh boot` and stays running in the background. Use `./build.sh start` / `./build.sh stop` to manage it manually.
 
 ### TFTP Server IP (Hardcoded)
 

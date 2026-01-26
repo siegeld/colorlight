@@ -45,6 +45,7 @@ pub struct Context {
     pub debug: bool,
     pub bitmap_stats: BitmapStats,
     pub layout: LayoutConfig,
+    pub reboot_pending: bool,
 }
 
 impl Context {
