@@ -6,6 +6,14 @@ use smoltcp::phy::{self, DeviceCapabilities};
 use smoltcp::time::Instant;
 use smoltcp::{Error, Result};
 
+// LiteEth buffer layout: nrxslots RX buffers followed by ntxslots TX buffers,
+// each SLOT_SIZE bytes, starting at the Ethmem base address.
+// NOTE: The LiteX SVD generator only describes 2 RX buffers regardless of nrxslots,
+// so the PAC's tx_buffer offsets are wrong when nrxslots > 2.
+// We compute addresses directly from the base.
+const SLOT_SIZE: usize = 2048;
+const NRXSLOTS: usize = 4;
+
 pub struct Eth {
     ethmac: Ethmac,
     ethbuf: Ethmem,
@@ -23,6 +31,11 @@ impl Eth {
 
         Eth { ethmac, ethbuf }
     }
+
+    /// Get the base address of the Ethmem region
+    fn buf_base(&self) -> *mut u8 {
+        self.ethbuf.rx_buffer_0(0) as *const _ as *mut u8
+    }
 }
 
 impl<'a> phy::Device<'a> for Eth {
@@ -33,36 +46,38 @@ impl<'a> phy::Device<'a> for Eth {
         if self.ethmac.sram_writer_ev_pending().read().bits() == 0 {
             return None;
         }
+        let base = self.buf_base();
         Some((
             Self::RxToken {
                 ethmac: &self.ethmac,
-                ethbuf: &self.ethbuf,
+                base,
             },
             Self::TxToken {
                 ethmac: &self.ethmac,
-                ethbuf: &self.ethbuf,
+                base,
             },
         ))
     }
 
     fn transmit(&'a mut self) -> Option<Self::TxToken> {
+        let base = self.buf_base();
         Some(Self::TxToken {
             ethmac: &self.ethmac,
-            ethbuf: &self.ethbuf,
+            base,
         })
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
         let mut caps = DeviceCapabilities::default();
         caps.max_transmission_unit = 2048;
-        caps.max_burst_size = Some(1);
+        caps.max_burst_size = Some(NRXSLOTS);
         caps
     }
 }
 
 pub struct EthRxToken<'a> {
     ethmac: &'a Ethmac,
-    ethbuf: &'a Ethmem,
+    base: *mut u8,
 }
 
 impl<'a> phy::RxToken for EthRxToken<'a> {
@@ -74,14 +89,10 @@ impl<'a> phy::RxToken for EthRxToken<'a> {
             if self.ethmac.sram_writer_ev_pending().read().bits() == 0 {
                 return Err(Error::Exhausted);
             }
-            let slot = self.ethmac.sram_writer_slot().read().bits();
-            let length = self.ethmac.sram_writer_length().read().bits();
-            let buf = match slot {
-                0 => (self.ethbuf.rx_buffer_0(0)) as *const _ as *const u8 as *mut u8,
-                1 => (self.ethbuf.rx_buffer_1(0)) as *const _ as *const u8 as *mut u8,
-                _ => return Err(Error::Exhausted),
-            };
-            let data = core::slice::from_raw_parts_mut(buf, length as usize);
+            let slot = self.ethmac.sram_writer_slot().read().bits() as usize;
+            let length = self.ethmac.sram_writer_length().read().bits() as usize;
+            let buf = self.base.add(slot * SLOT_SIZE);
+            let data = core::slice::from_raw_parts_mut(buf, length);
             let result = f(data);
             self.ethmac.sram_writer_ev_pending().write(|w| w.bits(1));
             result
@@ -91,7 +102,7 @@ impl<'a> phy::RxToken for EthRxToken<'a> {
 
 pub struct EthTxToken<'a> {
     ethmac: &'a Ethmac,
-    ethbuf: &'a Ethmem,
+    base: *mut u8,
 }
 
 impl<'a> phy::TxToken for EthTxToken<'a> {
@@ -105,29 +116,17 @@ impl<'a> phy::TxToken for EthTxToken<'a> {
 
         while self.ethmac.sram_reader_ready().read().bits() == 0 {}
         let result = f(unsafe { &mut TX_BUFFER[..len] });
-        let current_slot = unsafe { SLOT };
-        match current_slot {
-            0 => {
-                for (i, elem) in self.ethbuf.tx_buffer_0_iter().enumerate() {
-                    if i > len {
-                        break;
-                    }
-                    elem.write(|w| unsafe { w.bits(TX_BUFFER[i]) });
-                }
+        let current_slot = unsafe { SLOT } as usize;
+        // TX buffers start after NRXSLOTS RX buffers
+        unsafe {
+            let tx_buf = self.base.add((NRXSLOTS + current_slot) * SLOT_SIZE);
+            for i in 0..len {
+                core::ptr::write_volatile(tx_buf.add(i), TX_BUFFER[i]);
             }
-            1 => {
-                for (i, elem) in self.ethbuf.tx_buffer_1_iter().enumerate() {
-                    if i > len {
-                        break;
-                    }
-                    elem.write(|w| unsafe { w.bits(TX_BUFFER[i]) });
-                }
-            }
-            _ => return Err(Error::Exhausted),
-        };
+        }
         self.ethmac
             .sram_reader_slot()
-            .write(unsafe { |w| w.bits(current_slot.into()) });
+            .write(unsafe { |w| w.bits(current_slot as u32) });
         self.ethmac
             .sram_reader_length()
             .write(unsafe { |w| w.bits(len as u32) });
@@ -140,4 +139,3 @@ impl<'a> phy::TxToken for EthTxToken<'a> {
         result
     }
 }
-

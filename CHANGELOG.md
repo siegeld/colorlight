@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.9] - 2026-01-25
+
+### Added
+- **Video streaming tool** — `tools/send_video.py` streams video files to the LED panel via UDP using ffmpeg for real-time decoding
+  - Supports `--layout`, `--fps`, `--loop`, `--chunk-delay` options
+  - Auto-detects video FPS via ffprobe
+- **Fast bitmap receive loop** — Firmware drains all queued UDP packets per main loop iteration instead of one-at-a-time, reducing packet loss during video streaming
+
+### Changed
+- **LiteEth RX slots: 2 → 4** — Gateware change doubles hardware ethernet receive buffering (8KB), allowing higher sustained packet rates
+- **Ethernet driver rewrite** — Direct buffer address computation bypasses broken LiteX SVD generator (which only describes 2 RX buffers regardless of `nrxslots`)
+- **smoltcp burst size: 1 → 4** — Firmware processes up to 4 packets per `iface.poll()` call, matching the hardware RX slot count
+- **Bitmap UDP RX buffer: 16KB → 32KB** — Socket buffer increased with 24 metadata slots (was 12) to hold full frames
+
+### Performance
+- 96×96 (2 panels): **19 fps** at 2.8ms chunk delay (was 10.8 fps before — 76% improvement)
+- Reliable frame delivery at 3ms chunk delay (was 5ms)
+
+---
+
 ## [0.2.8] - 2026-01-25
 
 ### Added
@@ -188,6 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.9 | 2026-01-25 | Video streaming, 4 RX slots, fast bitmap receive |
 | 0.2.8 | 2026-01-25 | Web pattern selector, JTAG pinout docs |
 | 0.2.7 | 2026-01-25 | TFTP boot config, persistent flash, YAML layout |
 | 0.2.6 | 2026-01-25 | HTTP REST API with dual-socket refresh fix |

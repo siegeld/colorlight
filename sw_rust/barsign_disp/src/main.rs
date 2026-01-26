@@ -96,9 +96,9 @@ fn main() -> ! {
     };
 
     let bitmap_udp_socket = {
-        static mut BITMAP_UDP_RX_DATA: [u8; 16384] = [0; 16384];
+        static mut BITMAP_UDP_RX_DATA: [u8; 32768] = [0; 32768];
         static mut BITMAP_UDP_TX_DATA: [u8; 64] = [0; 64];
-        static mut BITMAP_UDP_RX_META: [UdpPacketMetadata; 12] = [UdpPacketMetadata::EMPTY; 12];
+        static mut BITMAP_UDP_RX_META: [UdpPacketMetadata; 24] = [UdpPacketMetadata::EMPTY; 24];
         static mut BITMAP_UDP_TX_META: [UdpPacketMetadata; 1] = [UdpPacketMetadata::EMPTY; 1];
         let rx = unsafe {
             UdpSocketBuffer::new(&mut BITMAP_UDP_RX_META[..], &mut BITMAP_UDP_RX_DATA[..])
@@ -202,7 +202,7 @@ fn main() -> ! {
     let mut http_close_at = [0i64; 2];
 
     loop {
-        // Use real timing: poll every 1ms
+        // 1ms tick for smoltcp timing
         delay.delay_ms(1u32);
         time_ms += 1;
         let time = Instant::from_millis(time_ms);
@@ -210,6 +210,49 @@ fn main() -> ! {
         loop_counter = loop_counter.wrapping_add(1);
 
         iface.poll(time).ok();
+
+        // Fast path: tight poll loop to drain bitmap UDP packets with minimal latency.
+        // After the normal poll, keep polling + draining until no more packets arrive.
+        // This lets us process bursts of chunks without waiting for the next 1ms tick.
+        for _burst in 0..50 {
+            {
+                let socket = iface.get_socket::<UdpSocket>(bitmap_udp_handle);
+                if !socket.is_open() {
+                    socket.bind(7000).ok();
+                }
+                let mut got_any = false;
+                while socket.can_recv() {
+                    match socket.recv() {
+                        Ok((data, _endpoint)) => {
+                            got_any = true;
+                            let complete = bitmap_rx.process_packet(data, &mut r.context.hub75);
+                            if r.context.debug {
+                                let s = &bitmap_rx.stats;
+                                writeln!(r.context.output, "BM: pkt={} chunk={}/{} {}x{} len={} mask={:04x}{}",
+                                    s.packets_total, s.last_chunk_index + 1, s.last_total_chunks,
+                                    s.last_width, s.last_height, s.last_data_len,
+                                    s.chunks_received,
+                                    if complete { " COMPLETE" } else { "" },
+                                ).ok();
+                            }
+                            if complete {
+                                r.context.hub75.swap_buffers();
+                                r.context.hub75.set_mode(hub75::OutputMode::FullColor);
+                                r.context.hub75.on();
+                                r.context.animation = menu::Animation::None;
+                            }
+                            r.context.bitmap_stats = bitmap_rx.stats;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                if !got_any {
+                    break;
+                }
+            } // socket borrow dropped here
+            // Poll again to move hardware packets into socket buffer
+            iface.poll(time).ok();
+        }
 
         // DHCP: poll for configuration changes
         {
@@ -411,37 +454,7 @@ fn main() -> ! {
                 Err(_) => (),
             };
         }
-        // udp:7000: bitmap — drain all queued packets
-        {
-            let socket = iface.get_socket::<UdpSocket>(bitmap_udp_handle);
-            if !socket.is_open() {
-                socket.bind(7000).ok();
-            }
-            while socket.can_recv() {
-                match socket.recv() {
-                    Ok((data, _endpoint)) => {
-                        let complete = bitmap_rx.process_packet(data, &mut r.context.hub75);
-                        if r.context.debug {
-                            let s = &bitmap_rx.stats;
-                            writeln!(r.context.output, "BM: pkt={} chunk={}/{} {}x{} len={} mask={:04x}{}",
-                                s.packets_total, s.last_chunk_index + 1, s.last_total_chunks,
-                                s.last_width, s.last_height, s.last_data_len,
-                                s.chunks_received,
-                                if complete { " COMPLETE" } else { "" },
-                            ).ok();
-                        }
-                        if complete {
-                            r.context.hub75.swap_buffers();
-                            r.context.hub75.set_mode(hub75::OutputMode::FullColor);
-                            r.context.hub75.on();
-                            r.context.animation = menu::Animation::None;
-                        }
-                        r.context.bitmap_stats = bitmap_rx.stats;
-                    }
-                    Err(_) => break,
-                }
-            }
-        }
+        // (bitmap UDP is handled in the fast path at top of loop)
         // tcp:80: HTTP server (two sockets — one accepts while the other closes)
         {
             let http_ip = match iface.ip_addrs()[0].address() {

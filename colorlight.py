@@ -266,7 +266,7 @@ class BaseSoC(SoCCore):
         # Rust firmware handles ARP/ICMP/TCP via smoltcp
         self.add_ethernet(
             phy=phy,
-            nrxslots=2,
+            nrxslots=4,
             ntxslots=2,
             local_ip=ip_address,
             remote_ip="10.11.6.65",  # Not used, but required

@@ -3,7 +3,7 @@
 <device schemaVersion="1.1" xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:noNamespaceSchemaLocation="CMSIS-SVD.xsd" >
     <vendor>litex</vendor>
     <name>SOC</name>
-    <description><![CDATA[Litex SoC 2026-01-26 00:03:10]]></description>
+    <description><![CDATA[Litex SoC 2026-01-26 03:28:13]]></description>
 
     <addressUnitBits>8</addressUnitBits>
     <width>32</width>
@@ -225,8 +225,8 @@ to the Wishbone/CSR bus are working correctly. The initial reset value of
                     <fields>
                         <field>
                             <name>sram_writer_slot</name>
-                            <msb>0</msb>
-                            <bitRange>[0:0]</bitRange>
+                            <msb>1</msb>
+                            <bitRange>[1:0]</bitRange>
                             <lsb>0</lsb>
                         </field>
                     </fields>
@@ -1540,16 +1540,16 @@ register to disable individual events.]]></description>
             <memoryRegion>
                 <name>ETHMAC</name>
                 <baseAddress>0x80000000</baseAddress>
-                <size>0x00002000</size>
+                <size>0x00003000</size>
             </memoryRegion>
             <memoryRegion>
                 <name>ETHMAC_RX</name>
                 <baseAddress>0x80000000</baseAddress>
-                <size>0x00001000</size>
+                <size>0x00002000</size>
             </memoryRegion>
             <memoryRegion>
                 <name>ETHMAC_TX</name>
-                <baseAddress>0x80001000</baseAddress>
+                <baseAddress>0x80002000</baseAddress>
                 <size>0x00001000</size>
             </memoryRegion>
             <memoryRegion>
@@ -1569,7 +1569,7 @@ register to disable individual events.]]></description>
             <constant name="CONFIG_CPU_NAME" value="vexriscv" />
             <constant name="CONFIG_CPU_HUMAN_NAME" value="VexRiscv_Min" />
             <constant name="CONFIG_CPU_NOP" value="nop" />
-            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-01-26 00:02:01" />
+            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-01-26 03:27:06" />
             <constant name="FLASH_BOOT_ADDRESS" value="2150629376" />
             <constant name="SPIFLASH_PAGE_SIZE" value="256" />
             <constant name="CONFIG_L2_SIZE" value="8192" />
@@ -1589,7 +1589,7 @@ register to disable individual events.]]></description>
             <constant name="CONFIG_BUS_DATA_WIDTH" value="32" />
             <constant name="CONFIG_BUS_ADDRESS_WIDTH" value="32" />
             <constant name="CONFIG_BUS_BURSTING" value="0" />
-            <constant name="ETHMAC_RX_SLOTS" value="2" />
+            <constant name="ETHMAC_RX_SLOTS" value="4" />
             <constant name="ETHMAC_TX_SLOTS" value="2" />
             <constant name="ETHMAC_SLOT_SIZE" value="2048" />
             <constant name="CONFIG_CPU_INTERRUPTS" value="3" />

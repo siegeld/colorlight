@@ -80,6 +80,7 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | `tools/send_image.py` | Send image files to panel via UDP port 7000 |
 | `tools/send_test_pattern.py` | Generate and send test patterns (gradient, bars, rainbow, heart) |
 | `tools/send_animation.py` | Send animated patterns (pulsing heart) at configurable FPS |
+| `tools/send_video.py` | Stream video files to panel via UDP using ffmpeg |
 
 ## Build Commands
 
@@ -265,6 +266,9 @@ python3 tools/send_test_pattern.py heart --host <board-ip> --width 96 --height 4
 
 # Send animated pattern (pulsing heart at 30fps, 3 loops)
 python3 tools/send_animation.py heart --host <board-ip> --width 96 --height 48 --fps 30 --loops 3
+
+# Stream a video file (auto-resize, loop, ffmpeg required)
+python3 tools/send_video.py path/to/video.mp4 --host <board-ip> --layout 1x2 --chunk-delay 0.003 --loop
 ```
 
 All tools default to `--host 10.11.6.250 --port 7000 --width 96 --height 48`.
