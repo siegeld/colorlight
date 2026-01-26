@@ -242,8 +242,8 @@ program_flash() {
 }
 
 is_tftp_running() {
-    if [[ -f "${TFTP_DIR}/dnsmasq.pid" ]]; then
-        local pid=$(cat "${TFTP_DIR}/dnsmasq.pid" 2>/dev/null)
+    if [[ -f "${TFTP_DIR}/tftpd.pid" ]]; then
+        local pid=$(cat "${TFTP_DIR}/tftpd.pid" 2>/dev/null)
         if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
             return 0
         fi
@@ -253,10 +253,10 @@ is_tftp_running() {
 
 stop_tftp() {
     if is_tftp_running; then
-        local pid=$(cat "${TFTP_DIR}/dnsmasq.pid" 2>/dev/null)
+        local pid=$(cat "${TFTP_DIR}/tftpd.pid" 2>/dev/null)
         print_step "Stopping TFTP server (PID ${pid})"
-        sudo kill "${pid}" 2>/dev/null || true
-        rm -f "${TFTP_DIR}/dnsmasq.pid"
+        kill "${pid}" 2>/dev/null || true
+        rm -f "${TFTP_DIR}/tftpd.pid"
         sleep 1
     fi
 }
@@ -277,7 +277,7 @@ detect_host_ip() {
 ensure_tftp() {
     # Already running — nothing to do
     if is_tftp_running; then
-        local pid=$(cat "${TFTP_DIR}/dnsmasq.pid" 2>/dev/null)
+        local pid=$(cat "${TFTP_DIR}/tftpd.pid" 2>/dev/null)
         print_step "TFTP server already running (PID ${pid})"
         return 0
     fi
@@ -288,9 +288,9 @@ ensure_tftp() {
         return 1
     fi
 
-    # Check dnsmasq is installed
-    if ! command -v dnsmasq &> /dev/null; then
-        print_warning "dnsmasq not installed — skipping TFTP server"
+    # Check python3 and tftpy are available
+    if ! python3 -c "import tftpy" 2>/dev/null; then
+        print_warning "python3 tftpy not installed — skipping TFTP server (pip install tftpy)"
         return 1
     fi
 
@@ -298,14 +298,15 @@ ensure_tftp() {
 
     mkdir -p "${TFTP_DIR}"
     print_step "Starting TFTP server on ${HOST_IP}"
-    sudo dnsmasq --port=0 --enable-tftp --tftp-port=6969 \
-        --tftp-root="${TFTP_DIR}" --listen-address="${HOST_IP}" \
-        --log-queries --log-facility="${TFTP_DIR}/dnsmasq.log" \
-        --pid-file="${TFTP_DIR}/dnsmasq.pid"
+    python3 "${SCRIPT_DIR}/tools/tftpd.py" \
+        --root "${TFTP_DIR}" --host "${HOST_IP}" --port 6969 \
+        --log "${TFTP_DIR}/tftpd.log" \
+        --pid "${TFTP_DIR}/tftpd.pid" &
+    disown
 
     sleep 1
     if is_tftp_running; then
-        print_success "TFTP server started (PID $(cat ${TFTP_DIR}/dnsmasq.pid))"
+        print_success "TFTP server started (PID $(cat ${TFTP_DIR}/tftpd.pid))"
     else
         print_warning "Could not start TFTP server (run manually: ./build.sh start)"
         return 1
@@ -333,7 +334,7 @@ do_boot() {
     sleep 3
 
     # Check if transfer happened
-    if grep -q "sent.*boot.bin" "${TFTP_DIR}/dnsmasq.log" 2>/dev/null; then
+    if grep -q "boot.bin" "${TFTP_DIR}/tftpd.log" 2>/dev/null; then
         print_success "Firmware transferred successfully"
     else
         print_warning "Transfer not detected in log (may still have worked)"
@@ -342,7 +343,7 @@ do_boot() {
     # Show log
     echo ""
     echo -e "${BLUE}TFTP Log:${NC}"
-    cat "${TFTP_DIR}/dnsmasq.log" 2>/dev/null | tail -5
+    cat "${TFTP_DIR}/tftpd.log" 2>/dev/null | tail -5
 
     # Test connectivity
     echo ""
