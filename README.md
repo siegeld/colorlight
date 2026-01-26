@@ -1,5 +1,6 @@
 # Colorlight HUB75 LED Controller
 
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -110,14 +111,70 @@ colorlight/
 ├── hub75.py               # HUB75 display driver (gateware)
 ├── gen_test_image.py      # Test pattern generator
 ├── Dockerfile             # Build environment
+├── bitstreams/            # Pre-built bitstreams for all panel sizes
 ├── sw_rust/               # Rust firmware
 │   ├── barsign_disp/      # Main application
 │   ├── litex-pac/         # Peripheral Access Crate
 │   └── smoltcp-0.8.0/     # Patched smoltcp (DHCP siaddr support)
-├── tools/                 # Python tools (send_image, send_animation, etc.)
+├── tools/                 # Python tools for sending content to the panel
 ├── .tftp/                 # TFTP-served config files (<mac>.yml)
-├── CLAUDE.md              # Development context
+├── legacy/                # Old scripts and experiments
 └── CHANGELOG.md           # Version history
+```
+
+## Tools
+
+Python scripts in `tools/` send content to the panel over the bitmap UDP protocol (port 7000). All tools support `--host`, `--port`, `--width`, and `--height`. Video/animation tools also support `--layout` and `--panel-size` for multi-panel grids.
+
+### send_image.py — Static Image
+
+Send any image file (PNG, JPEG, etc.) to the panel. Requires Pillow.
+
+```bash
+python tools/send_image.py photo.png
+python tools/send_image.py photo.png --host 10.11.6.70 --layout 2x1
+```
+
+### send_video.py — Video File
+
+Stream a local video file using ffmpeg for real-time decoding. Probes the file for native FPS.
+
+```bash
+python tools/send_video.py clip.mp4
+python tools/send_video.py clip.mp4 --fps 15 --loop --chunk-delay 0.003
+```
+
+### send_youtube.py — YouTube / Web Video
+
+Stream a YouTube video (or any [yt-dlp supported URL](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)) to the panel. Uses `yt-dlp` to resolve the stream URL and `ffmpeg` to decode it — no file is downloaded. Requires yt-dlp and ffmpeg.
+
+```bash
+python tools/send_youtube.py "https://www.youtube.com/watch?v=VIDEO_ID"
+python tools/send_youtube.py "https://www.youtube.com/watch?v=VIDEO_ID" --fps 15 --loop
+
+# Age-gated / auth videos (export cookies.txt from your browser)
+python tools/send_youtube.py "URL" --cookies cookies.txt
+
+# Custom format selection (default: bv* = best video)
+python tools/send_youtube.py "URL" --format "bv*[height<=720]"
+```
+
+### send_test_pattern.py — Test Patterns
+
+Generate and send a test pattern with no image file needed. Available patterns: `gradient`, `bars`, `rainbow`, `heart`.
+
+```bash
+python tools/send_test_pattern.py rainbow
+python tools/send_test_pattern.py bars --host 10.11.6.70
+```
+
+### send_animation.py — Animated Patterns
+
+Send a looping animated pattern. Currently available: `heart` (pulsing). Requires `send_test_pattern.py` in the same directory.
+
+```bash
+python tools/send_animation.py heart
+python tools/send_animation.py heart --fps 30 --loops 0   # infinite
 ```
 
 ## Telnet Commands
@@ -207,18 +264,19 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 
 | File | Description |
 |------|-------------|
-| `colorlight.bit` | FPGA bitstream for Colorlight 5A-75E v8.2 |
-| `barsign-disp.bin` | Rust firmware binary (rename to `boot.bin` for TFTP) |
+| `bitstreams/128x64.bit` | FPGA bitstream for 128x64 panels (default) |
+| `bitstreams/96x48.bit` | FPGA bitstream for 96x48 panels |
+| `bitstreams/64x32.bit` | FPGA bitstream for 64x32 panels |
+| `bitstreams/64x64.bit` | FPGA bitstream for 64x64 panels |
+| `barsign-disp.bin` | Rust firmware binary (universal, all panels) |
 
 ```bash
-# Flash bitstream permanently
-./build.sh flash
-
-# Or flash manually (--board colorlight is required)
-openFPGALoader --board colorlight --cable usb-blaster -f --unprotect-flash colorlight.bit
+# Flash bitstream for your panel size
+./build.sh flash                       # default (128x64)
+./build.sh --panel 96x48 flash         # specific panel
 
 # Serve firmware via TFTP
-cp barsign-disp.bin /path/to/tftp/boot.bin
+./build.sh start
 ```
 
 ## Known Issues

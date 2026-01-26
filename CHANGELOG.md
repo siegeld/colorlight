@@ -14,6 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-01-26
+
+First stable release. All core features working and tested.
+
+### Added
+- **Multi-panel build system** — `./build.sh build-all` builds bitstreams for all 4 panel sizes (128x64, 96x48, 64x32, 64x64) in one command, with pre-built bitstreams committed to `bitstreams/`
+- **Universal firmware** — Single firmware binary works with all panel sizes; only bitstreams differ per panel
+- **TFTP auto-start** — `./build.sh firmware` and `./build.sh boot` automatically start the TFTP server if not already running; idempotent and non-blocking
+- **128x64 default panel** — Default panel changed from 96x48 to 128x64
+- **Architecture docs** — New `ARCH.md` with internals: memory map, double buffering, IAC state machine, hardware notes, debugging tips
+- **Video streaming tool** — `tools/send_video.py` streams video files to the panel via UDP using ffmpeg
+
+### Changed
+- **Repository cleanup** — Legacy scripts, old notes, and unused code moved to `legacy/`
+- **README rewritten** — Concise build instructions via `build.sh`, removed incorrect manual docker commands, added multi-panel workflow
+- **Pre-built binaries** — All 4 panel bitstreams included in `bitstreams/` directory
+- **`build.sh` improvements** — `build-all` target, `get_bitstream_path` for panel-aware flash/sram, `--panel` flag selects bitstream without rebuilding
+- **Python tools** — All tools default to 128x64; `send_video.py` added with `--layout`, `--fps`, `--loop` options
+- **TFTP configs tracked** — `.tftp/*.yml` board configs committed to git
+
+### Fixed
+- **TFTP not attempted during batch builds** — `ensure_tftp` only runs on explicit `firmware`/`boot` targets, not when called internally from `build-all`
+- **TFTP failure non-fatal** — Warns instead of aborting the build if dnsmasq can't start
+
+---
+
 ## [0.2.9] - 2026-01-25
 
 ### Added
@@ -208,6 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.0.0 | 2026-01-26 | First stable release: multi-panel build, auto TFTP, repo cleanup |
 | 0.2.9 | 2026-01-25 | Video streaming, 4 RX slots, fast bitmap receive |
 | 0.2.8 | 2026-01-25 | Web pattern selector, JTAG pinout docs |
 | 0.2.7 | 2026-01-25 | TFTP boot config, persistent flash, YAML layout |
