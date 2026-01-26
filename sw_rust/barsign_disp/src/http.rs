@@ -112,7 +112,7 @@ impl HttpRequest {
 // ── Response Writer ─────────────────────────────────────────────
 
 pub struct HttpResponse {
-    pub data: heapless::Vec<u8, 2816>,
+    pub data: heapless::Vec<u8, 3072>,
 }
 
 impl HttpResponse {
@@ -213,6 +213,8 @@ li{{padding:2px 0}}\
     write!(resp, "<tr><td>Animation</td><td>{}</td></tr>", anim).ok();
     write!(resp, "<tr><td>Bitmap frames</td><td>{}</td></tr>",
         ctx.bitmap_stats.frames_completed).ok();
+    write!(resp, "<tr><td>Partial frames</td><td>{}</td></tr>",
+        ctx.bitmap_stats.frames_partial).ok();
     write!(resp, "<tr><td>Dropped frames</td><td>{}</td></tr>",
         ctx.bitmap_stats.frames_dropped).ok();
     {
@@ -423,8 +425,8 @@ fn api_bitmap_stats(resp: &mut HttpResponse, ctx: &Context) {
         s.packets_total, s.packets_valid).ok();
     write!(resp, r#""bad_magic":{},"bad_header":{},"#,
         s.packets_bad_magic, s.packets_bad_header).ok();
-    write!(resp, r#""frames_completed":{},"frames_dropped":{},"#,
-        s.frames_completed, s.frames_dropped).ok();
+    write!(resp, r#""frames_completed":{},"frames_partial":{},"frames_dropped":{},"#,
+        s.frames_completed, s.frames_partial, s.frames_dropped).ok();
     write!(resp, r#""fps":{},"frame_interval_ms":{},"avg_interval_ms":{},"jitter_ms":{},"#,
         fps, s.frame_interval_ms, s.avg_interval_ms, s.jitter_ms).ok();
     write!(resp, r#""last_frame_id":{},"#, s.last_frame_id).ok();
