@@ -124,57 +124,57 @@ colorlight/
 
 ## Tools
 
-Python scripts in `tools/` send content to the panel over the bitmap UDP protocol (port 7000). All tools support `--host`, `--port`, `--width`, and `--height`. Video/animation tools also support `--layout` and `--panel-size` for multi-panel grids.
+Python tools in `tools/` send content to the panel over the bitmap UDP protocol (port 7000).
+
+All tools accept `--host <ip>` (default: `10.11.6.250`), `--port` (default: `7000`), `--width` and `--height` (default: `128x64`). Video and animation tools also accept `--layout` (e.g., `2x1`) and `--panel-size` for multi-panel grids.
 
 ### send_image.py — Static Image
 
-Send any image file (PNG, JPEG, etc.) to the panel. Requires Pillow.
+Send any image file (PNG, JPEG, etc.) to the panel. Auto-resized to panel dimensions. Requires Pillow.
 
 ```bash
-python tools/send_image.py photo.png
+python tools/send_image.py photo.png --host 10.11.6.70
 python tools/send_image.py photo.png --host 10.11.6.70 --layout 2x1
 ```
 
 ### send_video.py — Video File
 
-Stream a local video file using ffmpeg for real-time decoding. Probes the file for native FPS.
+Stream a local video file to the panel. Requires ffmpeg.
 
 ```bash
-python tools/send_video.py clip.mp4
-python tools/send_video.py clip.mp4 --fps 15 --loop --chunk-delay 0.003
+python tools/send_video.py clip.mp4 --host 10.11.6.70
+python tools/send_video.py clip.mp4 --host 10.11.6.70 --fps 15 --loop
+python tools/send_video.py clip.mp4 --host 10.11.6.70 --layout 1x2 --chunk-delay 0.003
 ```
 
 ### send_youtube.py — YouTube / Web Video
 
-Stream a YouTube video (or any [yt-dlp supported URL](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)) to the panel. Uses `yt-dlp` to resolve the stream URL and `ffmpeg` to decode it — no file is downloaded. Requires yt-dlp and ffmpeg.
+Stream a YouTube video (or any [yt-dlp supported URL](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)) directly to the panel — no file is downloaded. Requires yt-dlp and ffmpeg.
 
 ```bash
-python tools/send_youtube.py "https://www.youtube.com/watch?v=VIDEO_ID"
-python tools/send_youtube.py "https://www.youtube.com/watch?v=VIDEO_ID" --fps 15 --loop
+python tools/send_youtube.py "https://youtube.com/watch?v=ID" --host 10.11.6.70
+python tools/send_youtube.py "https://youtube.com/watch?v=ID" --host 10.11.6.70 --loop
 
 # Age-gated / auth videos (export cookies.txt from your browser)
-python tools/send_youtube.py "URL" --cookies cookies.txt
-
-# Custom format selection (default: bv* = best video)
-python tools/send_youtube.py "URL" --format "bv*[height<=720]"
+python tools/send_youtube.py "URL" --host 10.11.6.70 --cookies cookies.txt
 ```
 
 ### send_test_pattern.py — Test Patterns
 
-Generate and send a test pattern with no image file needed. Available patterns: `gradient`, `bars`, `rainbow`, `heart`.
+Generate and send a test pattern. Available: `gradient`, `bars`, `rainbow`, `heart`.
 
 ```bash
-python tools/send_test_pattern.py rainbow
-python tools/send_test_pattern.py bars --host 10.11.6.70
+python tools/send_test_pattern.py rainbow --host 10.11.6.70
+python tools/send_test_pattern.py heart --host 10.11.6.70
 ```
 
 ### send_animation.py — Animated Patterns
 
-Send a looping animated pattern. Currently available: `heart` (pulsing). Requires `send_test_pattern.py` in the same directory.
+Send a looping animated pattern. Available: `heart` (pulsing).
 
 ```bash
-python tools/send_animation.py heart
-python tools/send_animation.py heart --fps 30 --loops 0   # infinite
+python tools/send_animation.py heart --host 10.11.6.70
+python tools/send_animation.py heart --host 10.11.6.70 --fps 30 --loops 0
 ```
 
 ## Telnet Commands
