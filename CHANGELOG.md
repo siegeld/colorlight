@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-01-26
+
+### Changed
+- **HUB75 outputs reduced from 8 to 4** — Frees BRAM by halving the row buffer allocation (the largest BRAM consumer). Output count is now configurable via `--outputs` flag in gateware build and `build.sh -o|--outputs`.
+- **MAC RX slots doubled: 4 → 8** — Uses freed BRAM for deeper ethernet receive buffering, eliminating MAC RX overflow drops during sustained UDP streaming.
+- **Firmware matches new defaults** — `OUTPUTS=4`, `MAX_OUTPUTS=4`, `NRXSLOTS=8`; web/telnet UI shows J1–J4 only.
+- **`build.sh` new option** — `-o|--outputs N` flag passed through to gateware build (default: 4).
+
+### Technical Details
+- `gateware/hub75.py`: All 4 submodule classes (`Hub75`, `RowController`, `RamToBufferReader`, `RamAddressGenerator`, `Output`) parameterized with `n_outputs`; signal widths computed dynamically from `n_outputs`.
+- `gateware/helper.py`: Connector allocation parameterized.
+- `gateware/colorlight.py`: `BaseSoC` accepts `n_outputs`, `nrxslots` bumped to 8, `--outputs` CLI argument added.
+- `sw_rust/barsign_disp/src/ethernet.rs`: `NRXSLOTS` = 8.
+- `sw_rust/barsign_disp/src/hub75.rs`: `OUTPUTS` = 4.
+- `sw_rust/barsign_disp/src/layout.rs`: `MAX_OUTPUTS` = 4, bounds checks use constant.
+- `sw_rust/barsign_disp/src/menu.rs`: Help text and validation updated for J1–J4.
+- `sw_rust/barsign_disp/src/http.rs`: Layout API loop bounded by `MAX_OUTPUTS`.
+
+---
+
 ## [1.3.1] - 2026-01-26
 
 ### Changed
@@ -278,6 +298,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.4.0 | 2026-01-26 | Parameterize HUB75 outputs (8→4), nrxslots 4→8 |
 | 1.3.1 | 2026-01-26 | Pin LiteX to 2025.12, reproducible Docker builds |
 | 1.3.0 | 2026-01-26 | BIOS broadcast TFTP on custom port 6969 |
 | 1.2.0 | 2026-01-26 | Dynamic TFTP server via DHCP siaddr/Option 66 |

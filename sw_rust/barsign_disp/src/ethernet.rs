@@ -12,7 +12,7 @@ use smoltcp::{Error, Result};
 // so the PAC's tx_buffer offsets are wrong when nrxslots > 2.
 // We compute addresses directly from the base.
 const SLOT_SIZE: usize = 2048;
-const NRXSLOTS: usize = 4;
+const NRXSLOTS: usize = 8;
 
 pub struct Eth {
     ethmac: Ethmac,
@@ -35,6 +35,15 @@ impl Eth {
     /// Get the base address of the Ethmem region
     fn buf_base(&self) -> *mut u8 {
         self.ethbuf.rx_buffer_0(0) as *const _ as *mut u8
+    }
+
+    /// Read MAC hardware error counters: (overflow, preamble_errors, crc_errors)
+    pub fn mac_errors(&self) -> (u32, u32, u32) {
+        (
+            self.ethmac.sram_writer_errors().read().bits(),
+            self.ethmac.rx_datapath_preamble_errors().read().bits(),
+            self.ethmac.rx_datapath_crc_errors().read().bits(),
+        )
     }
 }
 

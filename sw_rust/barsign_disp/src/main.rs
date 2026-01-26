@@ -6,7 +6,6 @@ use core::fmt::Write as _;
 
 use barsign_disp::*;
 use bitmap_udp::BitmapReceiver;
-use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::serial::Write;
 use embedded_hal::serial::Read;
 use ethernet::Eth;
@@ -41,11 +40,6 @@ fn main() -> ! {
     let mac_bytes = flash_id::derive_mac(&unique_id);
 
     let mut flash = img_flash::Flash::new(peripherals.spiflash_mmap);
-    let mut delay = TIMER {
-        registers: peripherals.timer0,
-        sys_clk: 40_000_000,  // 40MHz system clock
-    };
-
     // Print startup info
     writeln!(serial, "Flash UID: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
         unique_id[0], unique_id[1], unique_id[2], unique_id[3],
@@ -182,6 +176,9 @@ fn main() -> ! {
         layout: LayoutConfig::single_panel(96, 48),
         reboot_pending: false,
         boot_server: None,
+        mac_overflow: 0,
+        mac_preamble_err: 0,
+        mac_crc_err: 0,
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
@@ -203,10 +200,30 @@ fn main() -> ! {
     let mut http_response_sent = [0usize; 2];
     let mut http_close_at = [0i64; 2];
 
+    // Configure timer0 for periodic 1ms ticks (non-blocking)
+    unsafe {
+        let t = &*pac::Timer0::ptr();
+        t.en().write(|w| w.bits(0));
+        t.reload().write(|w| w.bits(40_000 - 1));  // 40MHz / 1000 = 40000 cycles per ms
+        t.load().write(|w| w.bits(40_000 - 1));
+        t.en().write(|w| w.bits(1));
+        t.ev_pending().write(|w| w.bits(1));        // clear any pending event
+    }
+
     loop {
-        // 1ms tick for smoltcp timing
-        delay.delay_ms(1u32);
-        time_ms += 1;
+        // Non-blocking 1ms tick: check if timer fired
+        let timer_fired = unsafe {
+            let t = &*pac::Timer0::ptr();
+            if t.ev_pending().read().bits() != 0 {
+                t.ev_pending().write(|w| w.bits(1));  // clear
+                true
+            } else {
+                false
+            }
+        };
+        if timer_fired {
+            time_ms += 1;
+        }
         let time = Instant::from_millis(time_ms);
 
         loop_counter = loop_counter.wrapping_add(1);
@@ -255,6 +272,18 @@ fn main() -> ! {
             // Poll again to move hardware packets into socket buffer
             iface.poll(time).ok();
         }
+
+        // Slow path: only run non-bitmap work on 1ms tick boundaries.
+        // This keeps the tight loop (poll MAC + drain bitmap) as fast as possible.
+        if !timer_fired {
+            continue;
+        }
+
+        // Read MAC hardware error counters
+        let (ovf, pre, crc) = iface.device().mac_errors();
+        r.context.mac_overflow = ovf;
+        r.context.mac_preamble_err = pre;
+        r.context.mac_crc_err = crc;
 
         // DHCP: poll for configuration changes
         {
@@ -359,9 +388,11 @@ fn main() -> ! {
                     .extend_from_slice(
                         // Taken from https://stackoverflow.com/a/4532395
                         // Does magic telnet stuff to behave more like a dumb serial terminal
-                        b"\xFF\xFD\x22\xFF\xFA\x22\x01\x00\xFF\xF0\xFF\xFB\x01\r\nWelcome to the menu. Use \"help\" for help\r\n> ",
+                        b"\xFF\xFD\x22\xFF\xFA\x22\x01\x00\xFF\xF0\xFF\xFB\x01",
                     )
                     .expect("Should always work");
+                write!(r.context.output, "\r\nColorlight v{}\r\n> ",
+                    env!("CARGO_PKG_VERSION")).ok();
             }
             telnet_active = socket.is_active();
 

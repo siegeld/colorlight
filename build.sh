@@ -19,6 +19,7 @@ REVISION="8.2"
 IP_ADDRESS="10.11.6.250"
 CABLE="usb-blaster"
 PANEL="128x64"
+OUTPUTS=4
 PATTERN="grid"
 BUILD_DIR="build/colorlight_5a_75e"
 BITSTREAM="${BUILD_DIR}/gateware/colorlight_5a_75e.bit"
@@ -104,7 +105,7 @@ build_bitstream() {
     check_docker_image
 
     print_step "Running LiteX build (revision ${REVISION}, IP ${IP_ADDRESS}, panel ${PANEL})"
-    docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${PANEL} --build"
+    docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${PANEL} --outputs ${OUTPUTS} --build"
 
     if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
         print_success "Bitstream built: ${BITSTREAM}"
@@ -126,7 +127,7 @@ build_all_panels() {
     for panel in 128x64 96x48 64x32 64x64; do
         echo ""
         print_step "Building bitstream for ${panel}..."
-        docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${panel} --build"
+        docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${panel} --outputs ${OUTPUTS} --build"
         if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
             cp "${SCRIPT_DIR}/${BITSTREAM}" "${SCRIPT_DIR}/bitstreams/${panel}.bit"
             print_success "bitstreams/${panel}.bit"
@@ -422,6 +423,7 @@ OPTIONS:
     -i, --ip IP             IP address for firmware (default: 10.11.6.250)
     -c, --cable CABLE       JTAG cable type (default: usb-blaster)
     -p, --panel PANEL       Panel type: 128x64, 96x48, 64x32, 64x64 (default: 128x64)
+    -o, --outputs N         Number of HUB75 outputs (default: 4)
     -t, --pattern PATTERN   Test pattern: grid, rainbow, solid_white, solid_red,
                             solid_green, solid_blue (default: grid)
     --host-ip IP            Host IP for TFTP server (auto-detected if not set)
@@ -522,6 +524,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -p|--panel)
             PANEL="$2"
+            shift 2
+            ;;
+        -o|--outputs)
+            OUTPUTS="$2"
             shift 2
             ;;
         -t|--pattern)

@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.3.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.4.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -9,7 +9,7 @@ A complete FPGA-based LED panel controller for **HUB75** displays, built on the 
 
 ## Features
 
-- **HUB75 LED Panel Driver** - Supports up to 8 output chains, 4 panels per chain
+- **HUB75 LED Panel Driver** - Configurable output count (default 4, up to 8 via `--outputs`), 4 panels per chain
 - **DHCP Networking** - Automatic IP via DHCP with unique MAC from SPI flash
 - **TFTP Boot Config** - Per-board YAML layout config fetched at boot via `<mac>.yml`
 - **HTTP REST API** - Web status page and JSON API on port 80

@@ -112,7 +112,7 @@ impl HttpRequest {
 // ── Response Writer ─────────────────────────────────────────────
 
 pub struct HttpResponse {
-    pub data: heapless::Vec<u8, 3072>,
+    pub data: heapless::Vec<u8, 4096>,
 }
 
 impl HttpResponse {
@@ -183,92 +183,106 @@ fn page_status(resp: &mut HttpResponse, ctx: &mut Context, ip: [u8; 4]) {
         Animation::None => "None",
         Animation::Rainbow { .. } => "Rainbow",
     };
+    // Head + CSS: card-grid dashboard
     write!(resp, "\
 <!DOCTYPE html><html><head>\
 <meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>\
-<link rel=icon href='data:,'>\
-<title>Colorlight</title>\
+<link rel=icon href='data:,'><title>Colorlight</title>\
 <style>\
-body{{font:16px/1.6 system-ui,sans-serif;background:#1a1a2e;color:#eee;padding:20px;max-width:520px;margin:0 auto}}\
-h2{{color:#fff;margin:0 0 14px;border-bottom:2px solid #333;padding-bottom:8px}}\
-h3{{color:#888;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px}}\
+*{{margin:0;box-sizing:border-box}}\
+body{{font:14px/1.5 system-ui,sans-serif;background:#0f0f17;color:#ccc;padding:24px}}\
+h1{{font-size:20px;color:#fff;margin:0 0 20px;padding-left:12px;border-left:3px solid #4a4ae0}}\
+.g{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}}\
+.c{{background:#181828;border:1px solid #252540;border-radius:8px;padding:14px}}\
+.c h2{{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#5a5a7a;margin:0 0 10px}}\
 table{{width:100%;border-collapse:collapse}}\
-td{{padding:5px 10px;border-bottom:1px solid #282840}}\
-td:first-child{{color:#aaa}}\
-select,button{{font:inherit;background:#282840;color:#eee;border:1px solid #444;padding:5px 10px;border-radius:4px}}\
-button{{background:#5858e0;color:#fff;border:0}}\
-a{{color:#78f}}\
-ul{{list-style:none;padding:0}}\
-li{{padding:2px 0}}\
-</style></head><body><h2>Colorlight Status</h2><table>").ok();
-    write!(resp, "<tr><td>MAC</td><td>{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}</td></tr>",
-        m[0], m[1], m[2], m[3], m[4], m[5]).ok();
-    write!(resp, "<tr><td>IP</td><td>{}.{}.{}.{}</td></tr>",
+td{{padding:3px 0}}td:first-child{{color:#7a7a9a}}\
+td+td{{text-align:right;color:#e8e8f0}}\
+select,button{{font:inherit;background:#252540;color:#ddd;border:1px solid #3a3a5a;padding:6px 12px;border-radius:5px}}\
+button{{background:#4a4ae0;color:#fff;border:0;cursor:pointer}}\
+a{{color:#7a9af0;text-decoration:none}}\
+.ft{{margin-top:20px;text-align:center;font-size:12px;color:#3a3a5a}}\
+</style></head><body>\
+<h1>Colorlight v{}</h1><div class=g>", env!("CARGO_PKG_VERSION")).ok();
+    // Network card
+    write!(resp, "<div class=c><h2>Network</h2><table>\
+<tr><td>MAC</td><td>{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}</td></tr>\
+<tr><td>IP</td><td>{}.{}.{}.{}</td></tr>",
+        m[0], m[1], m[2], m[3], m[4], m[5],
         ip[0], ip[1], ip[2], ip[3]).ok();
-    write!(resp, "<tr><td>Display</td><td>{}x{}</td></tr>", w, h).ok();
-    write!(resp, "<tr><td>Grid</td><td>{}x{} ({}x{} virtual)</td></tr>",
-        l.grid_cols, l.grid_rows, l.virtual_width(), l.virtual_height()).ok();
-    write!(resp, "<tr><td>Panel</td><td>{}x{}</td></tr>",
-        l.panel_width, l.panel_height).ok();
-    write!(resp, "<tr><td>Animation</td><td>{}</td></tr>", anim).ok();
-    write!(resp, "<tr><td>Bitmap frames</td><td>{}</td></tr>",
-        ctx.bitmap_stats.frames_completed).ok();
-    write!(resp, "<tr><td>Partial frames</td><td>{}</td></tr>",
-        ctx.bitmap_stats.frames_partial).ok();
-    write!(resp, "<tr><td>Dropped frames</td><td>{}</td></tr>",
-        ctx.bitmap_stats.frames_dropped).ok();
-    {
-        let avg = ctx.bitmap_stats.avg_interval_ms;
-        let fps = if avg > 0 { 1000 / avg } else { 0 };
-        write!(resp, "<tr><td>FPS</td><td>{} ({}ms jitter)</td></tr>",
-            fps, ctx.bitmap_stats.jitter_ms).ok();
-    }
     match ctx.boot_server {
-        Some((ip, source)) => {
+        Some((sip, source)) => {
             let src = match source {
                 BootServerSource::Option66 => "option 66",
                 BootServerSource::Fallback => "fallback",
             };
             write!(resp, "<tr><td>Boot server</td><td>{}.{}.{}.{} ({})</td></tr>",
-                ip[0], ip[1], ip[2], ip[3], src).ok();
+                sip[0], sip[1], sip[2], sip[3], src).ok();
         }
-        None => {
-            write!(resp, "<tr><td>Boot server</td><td>-</td></tr>").ok();
-        }
+        None => {}
     }
-    write!(resp, "</table><h3>Panels</h3><table>").ok();
+    write!(resp, "</table></div>").ok();
+    // Display card
+    write!(resp, "<div class=c><h2>Display</h2><table>\
+<tr><td>Resolution</td><td>{}x{}</td></tr>\
+<tr><td>Grid</td><td>{}x{} ({}x{} virtual)</td></tr>\
+<tr><td>Panel</td><td>{}x{}</td></tr>\
+<tr><td>Animation</td><td>{}</td></tr>\
+</table></div>",
+        w, h,
+        l.grid_cols, l.grid_rows, l.virtual_width(), l.virtual_height(),
+        l.panel_width, l.panel_height, anim).ok();
+    // Streaming card
+    let avg = ctx.bitmap_stats.avg_interval_ms;
+    let fps = if avg > 0 { 1000 / avg } else { 0 };
+    write!(resp, "<div class=c><h2>Streaming</h2><table>\
+<tr><td>Frames</td><td>{}</td></tr>\
+<tr><td>Partial</td><td>{}</td></tr>\
+<tr><td>Dropped</td><td>{}</td></tr>\
+<tr><td>FPS</td><td>{} ({}ms jitter)</td></tr>\
+</table></div>",
+        ctx.bitmap_stats.frames_completed, ctx.bitmap_stats.frames_partial,
+        ctx.bitmap_stats.frames_dropped, fps, ctx.bitmap_stats.jitter_ms).ok();
+    // MAC Diagnostics card
+    write!(resp, "<div class=c><h2>MAC Diagnostics</h2><table>\
+<tr><td>RX overflow</td><td>{}</td></tr>\
+<tr><td>CRC errors</td><td>{}</td></tr>\
+<tr><td>Preamble errors</td><td>{}</td></tr>\
+</table></div>",
+        ctx.mac_overflow, ctx.mac_crc_err, ctx.mac_preamble_err).ok();
+    // Panels card
+    write!(resp, "<div class=c><h2>Panels</h2><table>").ok();
     for (i, a) in l.assignments.iter().enumerate() {
         match a {
             Some((col, row)) => {
-                write!(resp, "<tr><td>J{}</td><td>({},{})</td></tr>", i + 1, col, row).ok();
+                write!(resp, "<tr><td>J{}</td><td>{},{}</td></tr>", i + 1, col, row).ok();
             }
             None => {
                 write!(resp, "<tr><td>J{}</td><td>-</td></tr>", i + 1).ok();
             }
         }
     }
-    write!(resp, "</table><h3>Pattern</h3>\
-<select id=pat>\
-<option>grid</option>\
-<option>rainbow</option>\
-<option>rainbow_anim</option>\
-<option>white</option>\
-<option>red</option>\
-<option>green</option>\
-<option>blue</option>\
+    write!(resp, "</table></div>").ok();
+    // Controls card
+    write!(resp, "<div class=c><h2>Controls</h2>\
+<div style='margin-bottom:10px'>\
+<select id=p>\
+<option>grid<option>rainbow<option>rainbow_anim\
+<option>white<option>red<option>green<option>blue\
 </select> \
 <button onclick=\"fetch('/api/display/pattern',{{method:'POST',headers:{{'Content-Type':'application/json'}},\
-body:JSON.stringify({{name:document.getElementById('pat').value}})}}).then(r=>r.json()).then(j=>{{document.getElementById('msg').textContent=j.ok?'Loaded!':'Error'}}\
-).catch(()=>{{document.getElementById('msg').textContent='Failed'}})\">Load</button> \
-<span id=msg></span>\
-<h3>System</h3>\
-<button onclick=\"fetch('/api/reboot',{{method:'POST'}});this.textContent='Rebooting...';this.disabled=true\">Reboot</button>\
-<h3>API</h3><ul>\
-<li><a href=/api/status>/api/status</a></li>\
-<li><a href=/api/layout>/api/layout</a></li>\
-<li><a href=/api/display>/api/display</a></li>\
-<li><a href=/api/bitmap/stats>/api/bitmap/stats</a></li>\
-</ul></body></html>").ok();
+body:JSON.stringify({{name:p.value}})}}).then(r=>r.json()).then(j=>{{m.textContent=j.ok?'Loaded':'Error'}})\
+.catch(()=>{{m.textContent='Failed'}})\">Load</button> \
+<span id=m></span></div>\
+<button onclick=\"fetch('/api/reboot',{{method:'POST'}});this.textContent='Rebooting...';this.disabled=1\">Reboot</button>\
+</div>").ok();
+    // Close grid + footer
+    write!(resp, "</div><div class=ft>\
+<a href=/api/status>status</a> &middot; \
+<a href=/api/layout>layout</a> &middot; \
+<a href=/api/display>display</a> &middot; \
+<a href=/api/bitmap/stats>bitmap/stats</a>\
+</div></body></html>").ok();
 }
 
 // ── JSON API Handlers ───────────────────────────────────────────
@@ -321,7 +335,7 @@ fn api_layout_post(req: &HttpRequest, resp: &mut HttpResponse, ctx: &mut Context
             ctx.layout.grid_rows = rows;
         }
     }
-    for i in 1u8..=8 {
+    for i in 1u8..=crate::layout::MAX_OUTPUTS as u8 {
         let key = [b'J', b'0' + i];
         if let Ok(key_str) = core::str::from_utf8(&key) {
             if let Some(pos) = json_get_str(body, key_str) {
@@ -430,9 +444,11 @@ fn api_bitmap_stats(resp: &mut HttpResponse, ctx: &Context) {
     write!(resp, r#""fps":{},"frame_interval_ms":{},"avg_interval_ms":{},"jitter_ms":{},"#,
         fps, s.frame_interval_ms, s.avg_interval_ms, s.jitter_ms).ok();
     write!(resp, r#""last_frame_id":{},"#, s.last_frame_id).ok();
-    write!(resp, r#""last_chunk":"{}/{}","last_size":"{}x{}","last_data_len":{}}}"#,
+    write!(resp, r#""last_chunk":"{}/{}","last_size":"{}x{}","last_data_len":{},"#,
         s.last_chunk_index, s.last_total_chunks,
         s.last_width, s.last_height, s.last_data_len).ok();
+    write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{}}}"#,
+        ctx.mac_overflow, ctx.mac_crc_err, ctx.mac_preamble_err).ok();
 }
 
 fn api_reboot(resp: &mut HttpResponse, ctx: &mut Context) {

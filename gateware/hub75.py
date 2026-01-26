@@ -11,7 +11,7 @@ sdram_offset = 0x00400000//2//4
 
 
 class Hub75(Module, AutoCSR):
-    def __init__(self, pins_common, pins, sdram, columns=96, rows=48, scan=24, chain_length_2=0):
+    def __init__(self, pins_common, pins, sdram, columns=96, rows=48, scan=24, chain_length_2=0, n_outputs=8):
         """
         HUB75 LED Panel Controller.
 
@@ -37,7 +37,7 @@ class Hub75(Module, AutoCSR):
             CSRField("offset", description="Framebuffer base address in 32-bit words", size=20),
         ], reset=sdram_offset)
         panel_config = Array()
-        for panel_output in range(8):
+        for panel_output in range(n_outputs):
             for chain_pos in range(1 << chain_length_2):
                 name = "panel" + str(panel_output) + "_" + str(chain_pos)
                 csr = CSRStorage(name=name,
@@ -67,7 +67,7 @@ class Hub75(Module, AutoCSR):
             self.common, pins, output_config, panel_config, read_port,
             fb_base=self.fb_base.storage,
             columns=columns, rows_per_half=rows_per_half, scan=scan,
-            chain_length_2=chain_length_2
+            chain_length_2=chain_length_2, n_outputs=n_outputs
         )
         self.palette_memory = self.specific.palette_memory
 
@@ -147,7 +147,7 @@ class FrameController(Module):
 class RowController(Module):
     def __init__(self, hub75_common, outputs_specific, output_config,
                  panel_config, read_port, fb_base=None, columns=96, rows_per_half=24, scan=24,
-                 chain_length_2=0):
+                 chain_length_2=0, n_outputs=8):
         self.specials.palette_memory = palette_memory = Memory(
             width=32, depth=256, name="palette"
         )
@@ -164,7 +164,7 @@ class RowController(Module):
             row_writers_outputs = Array()
             # TODO Change this later on, if the memory is needed
             # A quarter is not needed and (somewhat) easily used
-            for _ in range(8):
+            for _ in range(n_outputs):
                 row_buffer = Memory(
                     width=32, depth=buffer_depth,
                 )
@@ -196,15 +196,16 @@ class RowController(Module):
             output_config.indexed, output_config.width, panel_config,
             read_port, row_writers[~shifting_buffer], palette_memory,
             fb_base=fb_base,
-            columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2)
+            columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2,
+            n_outputs=n_outputs)
         self.submodules.row_module = RowModule(
             row_start, hub75_common.clk, columns=columns, chain_length_2=chain_length_2
         )
 
         self.submodules.output = Output(outputs_specific,
                                         row_readers[shifting_buffer], self.row_module.counter,
-                                        hub75_common.output_bit, self.row_module.buffer_select
-                                        )
+                                        hub75_common.output_bit, self.row_module.buffer_select,
+                                        n_outputs=n_outputs)
 
         self.submodules.fsm = FSM(reset_state="IDLE")
         self.fsm.act("IDLE",
@@ -246,6 +247,7 @@ class RamToBufferReader(Module):
             columns=96,
             rows_per_half=24,
             chain_length_2=0,
+            n_outputs=8,
     ):
         self.done = Signal()
         # If ram bandwidth is needed for something else
@@ -260,7 +262,8 @@ class RamToBufferReader(Module):
         self.submodules.ram_adr = RamAddressGenerator(
             start, self.reader.sink.ready & ~self.prevent_read, row, image_width, panel_config,
             fb_base=fb_base,
-            columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2)
+            columns=columns, rows_per_half=rows_per_half, chain_length_2=chain_length_2,
+            n_outputs=n_outputs)
 
         # Generate rsv_level which was removed
         rsv_level = Signal(max=16 + 1)
@@ -329,12 +332,13 @@ class RamToBufferReader(Module):
         # Buffer Writer
         # Calculate bits needed for column addressing
         columns_bits = (columns - 1).bit_length()  # e.g., 7 for 96 columns (fits in 7 bits)
+        outputs_bits = (n_outputs - 1).bit_length()
         buffer_done = Signal()
-        buffer_counter = Signal(columns_bits + 1 + chain_length_2 + 3)
-        buffer_select = Signal(3)
+        buffer_counter = Signal(columns_bits + 1 + chain_length_2 + outputs_bits)
+        buffer_select = Signal(outputs_bits)
         buffer_address = Signal(columns_bits + 1 + chain_length_2)
 
-        for i in range(8):
+        for i in range(n_outputs):
             self.sync += [
                 If(gamma_data_valid,
                     buffer_write_port[i].dat_w.eq(gamma_data),
@@ -383,8 +387,9 @@ class RamAddressGenerator(Module):
         columns=96,
         rows_per_half=24,
         chain_length_2=0,
+        n_outputs=8,
     ):
-        outputs_2 = 3
+        outputs_2 = (n_outputs - 1).bit_length()
         columns_bits = (columns - 1).bit_length()  # e.g., 7 for 96 columns
         counter = Signal(columns_bits + 1 + chain_length_2 + outputs_2)
         running = Signal(1)
@@ -394,7 +399,7 @@ class RamAddressGenerator(Module):
         counter_select = Signal(chain_length_2 + outputs_2)
 
         # Total count: columns * 2 (halves) * chains * outputs
-        counter_max = columns * 2 * (1 << chain_length_2) * 8 - 1
+        counter_max = columns * 2 * (1 << chain_length_2) * n_outputs - 1
 
         # Started
         self.comb += [
@@ -502,8 +507,8 @@ class RowModule(Module):
 
 
 class Output(Module):
-    def __init__(self, outputs_specific, buffer_readers, address, output_bit, buffer_select):
-        for i in range(8):
+    def __init__(self, outputs_specific, buffer_readers, address, output_bit, buffer_select, n_outputs=8):
+        for i in range(n_outputs):
             out = outputs_specific[i]
             r_pins = Array([out.r0, out.r1])
             g_pins = Array([out.g0, out.g1])

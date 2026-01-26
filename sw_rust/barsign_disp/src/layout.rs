@@ -1,7 +1,7 @@
 /// Panel layout configuration for multi-panel virtual displays.
-/// Maps physical J-connectors (outputs 0–7) to grid positions.
+/// Maps physical J-connectors (outputs 0–3) to grid positions.
 
-pub const MAX_OUTPUTS: usize = 8;
+pub const MAX_OUTPUTS: usize = 4;
 const POS_UNIT: u16 = 16; // gateware multiplier
 
 pub struct LayoutConfig {
@@ -9,7 +9,7 @@ pub struct LayoutConfig {
     pub panel_height: u16, // physical panel height (e.g., 48)
     pub grid_cols: u8,     // virtual grid columns
     pub grid_rows: u8,     // virtual grid rows
-    /// For each output 0–7: Some((col, row)) if assigned, None if unused
+    /// For each output 0–3: Some((col, row)) if assigned, None if unused
     pub assignments: [Option<(u8, u8)>; MAX_OUTPUTS],
 }
 
@@ -56,7 +56,7 @@ impl LayoutConfig {
     /// - `grid=2x1` — set grid dimensions
     /// - `panel_width=96` — physical panel width
     /// - `panel_height=48` — physical panel height
-    /// - `J1=0,0` through `J8=7,7` — assign output to grid position
+    /// - `J1=0,0` through `J4=7,7` — assign output to grid position
     pub fn parse(text: &str) -> Option<Self> {
         let mut config = Self::single_panel(96, 48);
         // Clear default assignment — config should be explicit
@@ -91,10 +91,10 @@ impl LayoutConfig {
                         }
                     }
                     _ => {
-                        // Try J1–J8
+                        // Try J1–J4
                         if let Some(rest) = key.strip_prefix('J') {
                             if let Ok(n) = parse_u8(rest) {
-                                if n >= 1 && n <= 8 {
+                                if n >= 1 && n <= MAX_OUTPUTS as u8 {
                                     if let Some((col, row)) = parse_pos(value) {
                                         config.assignments[(n - 1) as usize] = Some((col, row));
                                     }

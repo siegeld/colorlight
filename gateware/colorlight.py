@@ -135,6 +135,7 @@ class BaseSoC(SoCCore):
         no_ident_version=False,
         ip_address="10.11.6.250",
         panel="96x48",
+        n_outputs=4,
         **kwargs
     ):
         platform = colorlight_5a_75e.Platform(revision=revision)
@@ -233,9 +234,9 @@ class BaseSoC(SoCCore):
         )
 
         # Add hub75 connectors
-        platform.add_extension(helper.hub75_conn(platform))
+        platform.add_extension(helper.hub75_conn(platform, n_outputs=n_outputs))
         pins_common = platform.request("hub75_common")
-        pins = [platform.request("hub75_data", i) for i in range(8)]
+        pins = [platform.request("hub75_data", i) for i in range(n_outputs)]
 
         # Get panel configuration
         panel_cfg = PANELS[panel]
@@ -243,7 +244,8 @@ class BaseSoC(SoCCore):
             pins_common, pins, self.sdram,
             columns=panel_cfg["columns"],
             rows=panel_cfg["rows"],
-            scan=panel_cfg["scan"]
+            scan=panel_cfg["scan"],
+            n_outputs=n_outputs
         )
 
         # Ethernet / Etherbone ---------------------------------------------------------------------
@@ -266,7 +268,7 @@ class BaseSoC(SoCCore):
         # Rust firmware handles ARP/ICMP/TCP via smoltcp
         self.add_ethernet(
             phy=phy,
-            nrxslots=4,
+            nrxslots=8,
             ntxslots=2,
             local_ip=ip_address,
             remote_ip="10.11.6.65",
@@ -330,6 +332,12 @@ def main():
         choices=list(PANELS.keys()),
         help=f"Panel type (default: 96x48). Available: {', '.join(PANELS.keys())}",
     )
+    parser.add_argument(
+        "--outputs",
+        default=4,
+        type=int,
+        help="Number of HUB75 outputs (default: 4)",
+    )
     args = parser.parse_args()
 
     soc = BaseSoC(
@@ -337,6 +345,7 @@ def main():
         sys_clk_freq=args.sys_clk_freq,
         ip_address=args.ip_address,
         panel=args.panel,
+        n_outputs=args.outputs,
         **soc_core_argdict(args)
     )
     builder_options = builder_argdict(args)

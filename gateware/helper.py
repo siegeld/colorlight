@@ -3,12 +3,12 @@ from migen import *
 from litex.build.generic_platform import Subsignal, Pins, Misc, IOStandard
 
 
-def hub75_conn(platform):
+def hub75_conn(platform, n_outputs=8):
     connectors = platform.constraint_manager.connector_manager.connector_table
     hub75_extension = []
-    for connector in range(8):
+    for connector in range(n_outputs):
         name = "j" + str(connector + 1)
-        # Results in 0-7
+        # Results in 0..(n_outputs-1)
         number = connector
         pins = connectors[name]
         hub75_extension.append(

@@ -57,6 +57,9 @@ pub struct Context {
     pub reboot_pending: bool,
     /// TFTP server IP and how it was discovered.
     pub boot_server: Option<([u8; 4], BootServerSource)>,
+    pub mac_overflow: u32,
+    pub mac_preamble_err: u32,
+    pub mac_crc_err: u32,
 }
 
 impl Context {
@@ -267,7 +270,7 @@ pub const ROOT_MENU: Menu<Context> = Menu {
                 parameters: &[
                     Parameter::Mandatory {
                         parameter_name: "output",
-                        help: Some("J1-J8 or show"),
+                        help: Some("J1-J4 or show"),
                     },
                     Parameter::Optional {
                         parameter_name: "pos",
@@ -546,6 +549,9 @@ fn bitmap_status(
     writeln!(context.output, "  last size: {}x{}", s.last_width, s.last_height).unwrap();
     writeln!(context.output, "  last data len: {}", s.last_data_len).unwrap();
     writeln!(context.output, "  chunks_received: 0b{:032b}", s.chunks_received).unwrap();
+    writeln!(context.output, "  MAC overflow: {}", context.mac_overflow).unwrap();
+    writeln!(context.output, "  MAC preamble: {}", context.mac_preamble_err).unwrap();
+    writeln!(context.output, "  MAC CRC: {}", context.mac_crc_err).unwrap();
 }
 
 fn debug_toggle(
@@ -639,14 +645,14 @@ fn panel_cmd(
     // Parse J# output number
     let output_num = if let Some(rest) = output_arg.strip_prefix('J') {
         match rest.parse::<u8>() {
-            Ok(n) if n >= 1 && n <= 8 => n,
+            Ok(n) if n >= 1 && n <= crate::layout::MAX_OUTPUTS as u8 => n,
             _ => {
-                writeln!(context.output, "Invalid output: {} (use J1-J8)", output_arg).unwrap();
+                writeln!(context.output, "Invalid output: {} (use J1-J4)", output_arg).unwrap();
                 return;
             }
         }
     } else {
-        writeln!(context.output, "Invalid output: {} (use J1-J8 or show)", output_arg).unwrap();
+        writeln!(context.output, "Invalid output: {} (use J1-J4 or show)", output_arg).unwrap();
         return;
     };
 
