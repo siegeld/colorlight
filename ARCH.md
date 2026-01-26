@@ -41,8 +41,8 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 
 | File | Purpose |
 |------|---------|
-| `colorlight.py` | LiteX SoC definition, peripheral instantiation |
-| `hub75.py` | HUB75 display driver gateware (includes `fb_base` CSR) |
+| `gateware/colorlight.py` | LiteX SoC definition, peripheral instantiation |
+| `gateware/hub75.py` | HUB75 display driver gateware (includes `fb_base` CSR) |
 | `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, network loop, DHCP, telnet IAC parser |
 | `sw_rust/barsign_disp/src/http.rs` | HTTP/1.1 server: status page, REST API for layout/display/patterns |
 | `sw_rust/barsign_disp/src/hub75.rs` | HUB75 driver: double-buffered framebuffer, swap_buffers() |
@@ -109,11 +109,11 @@ Without this parser, telnet option bytes (e.g. `0x22` = `"`) leak through as spu
 
 **Symptom:** BIOS sends TFTP requests for `boot.bin` instead of loading from flash.
 
-**Cause:** `colorlight.py` defines `GD25Q16` flash but rev 8.2 uses W25Q32JV.
+**Cause:** `gateware/colorlight.py` defines `GD25Q16` flash but rev 8.2 uses W25Q32JV.
 
 **Workaround:** Use TFTP boot (see README).
 
-**Fix:** Update flash chip in `colorlight.py`: `GD25Q16` -> `W25Q32JV`.
+**Fix:** Update flash chip in `gateware/colorlight.py`: `GD25Q16` -> `W25Q32JV`.
 
 ### TCP Connection Timeout
 

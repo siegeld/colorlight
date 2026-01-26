@@ -104,7 +104,7 @@ build_bitstream() {
     check_docker_image
 
     print_step "Running LiteX build (revision ${REVISION}, IP ${IP_ADDRESS}, panel ${PANEL})"
-    docker_run "./colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${PANEL} --build"
+    docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${PANEL} --build"
 
     if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
         print_success "Bitstream built: ${BITSTREAM}"
@@ -126,7 +126,7 @@ build_all_panels() {
     for panel in 128x64 96x48 64x32 64x64; do
         echo ""
         print_step "Building bitstream for ${panel}..."
-        docker_run "./colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${panel} --build"
+        docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${panel} --build"
         if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
             cp "${SCRIPT_DIR}/${BITSTREAM}" "${SCRIPT_DIR}/bitstreams/${panel}.bit"
             print_success "bitstreams/${panel}.bit"
@@ -162,7 +162,7 @@ build_firmware() {
 
     # Generate test image for current panel
     print_step "Generating test image for ${PANEL} panel (pattern: ${PATTERN})"
-    docker_run "python3 /project/gen_test_image.py --panel ${PANEL} --pattern ${PATTERN} -o /project/img_data.bin"
+    docker_run "python3 /project/gateware/gen_test_image.py --panel ${PANEL} --pattern ${PATTERN} -o /project/img_data.bin"
 
     print_step "Compiling firmware with cargo"
     docker_run "cd /project/${FIRMWARE_DIR} && cargo build --release"
@@ -442,7 +442,7 @@ EXAMPLES:
     # Rebuild firmware only (universal, works with all panels)
     ./build.sh firmware
 
-    # Regenerate PAC after modifying colorlight.py
+    # Regenerate PAC after modifying gateware/colorlight.py
     ./build.sh pac firmware
 
 JTAG CABLES:
@@ -465,7 +465,7 @@ WORKFLOW:
     4. Deploy to flash (once flash boot is fixed):
        ./build.sh flash
 
-    5. After modifying colorlight.py (SoC changes):
+    5. After modifying gateware/colorlight.py (SoC changes):
        ./build.sh bitstream pac firmware
 
     6. Stop TFTP server when done:

@@ -14,9 +14,8 @@ img_data*.bin
 barsign-disp-flash.bin
 
 # Pre-built binaries (kept in repo for flashing without rebuilding)
-!barsign-disp.bin
-!colorlight.bit
 !bitstreams/*.bit
+!.tftp/boot.bin
 
 # -----------------------------------------------------------------------------
 # LiteX Dependencies (use Docker build environment)
@@ -78,7 +77,6 @@ Thumbs.db
 # Local Development
 # -----------------------------------------------------------------------------
 .claude/
-.tftp/boot.bin
 .tftp/dnsmasq.*
 *.tmp
 *.log
@@ -89,4 +87,5 @@ Thumbs.db
 # Legacy Clutter (not deleted, just ignored)
 # -----------------------------------------------------------------------------
 build_*/
-colorlite/
+legacy/colorlite/
+legacy/venv/

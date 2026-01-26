@@ -98,14 +98,6 @@ pub const ROOT_MENU: Menu<Context> = Menu {
         },
         &Item {
             item_type: ItemType::Callback {
-                function: default_indexed_image,
-                parameters: &[],
-            },
-            command: "default_indexed_image",
-            help: Some("Displays the default indexed image"),
-        },
-        &Item {
-            item_type: ItemType::Callback {
                 function: load_spi_image,
                 parameters: &[],
             },
@@ -301,23 +293,6 @@ fn default_image(
     hub75.write_img_data(0, image.3);
     hub75.swap_buffers();
     hub75.set_mode(OutputMode::FullColor);
-    hub75.on();
-}
-
-fn default_indexed_image(
-    _menu: &Menu<Context>,
-    _item: &Item<Context>,
-    _args: &[&str],
-    context: &mut Context,
-) {
-    use crate::img;
-    let hub75 = &mut context.hub75;
-    let image = img::load_default_indexed_image();
-    hub75.set_img_param(image.0, image.1);
-    hub75.write_img_data(0, image.3);
-    hub75.swap_buffers();
-    hub75.set_mode(OutputMode::Indexed);
-    hub75.set_palette(0, image.4);
     hub75.on();
 }
 

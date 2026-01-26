@@ -107,10 +107,13 @@ curl http://<board-ip>/
 ```
 colorlight/
 ├── build.sh               # Build script (run ./build.sh --help)
-├── colorlight.py          # LiteX SoC definition
-├── hub75.py               # HUB75 display driver (gateware)
-├── gen_test_image.py      # Test pattern generator
 ├── Dockerfile             # Build environment
+├── gateware/              # FPGA gateware (Python/Migen)
+│   ├── colorlight.py      # LiteX SoC definition
+│   ├── hub75.py           # HUB75 display driver
+│   ├── gen_test_image.py  # Test pattern generator
+│   ├── helper.py          # HUB75 connector pin definitions
+│   └── smoleth.py         # Ethernet module (legacy)
 ├── bitstreams/            # Pre-built bitstreams for all panel sizes
 ├── sw_rust/               # Rust firmware
 │   ├── barsign_disp/      # Main application
@@ -251,12 +254,23 @@ telnet <board-ip> 23
 ## Boot Workflow
 
 1. **Power on** — BIOS loads bitstream from SPI flash
-2. **BIOS TFTP** — BIOS fetches `boot.bin` firmware from TFTP server
+2. **BIOS TFTP** — BIOS fetches `boot.bin` from the TFTP server (see note below)
 3. **Firmware starts** — DHCP acquires IP and unique MAC from flash UID
-4. **Config fetch** — Firmware fetches `<mac>.yml` from TFTP server
+4. **Config fetch** — Firmware fetches `<mac>.yml` from the TFTP server (see note below)
 5. **Layout applied** — Panel grid configured and display redrawn
 
 The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot. The TFTP server is started automatically by `./build.sh firmware` or `./build.sh boot` and stays running in the background. Use `./build.sh stop` to shut it down.
+
+### TFTP Server IP (Hardcoded)
+
+Both TFTP fetches currently use a **hardcoded server IP of `10.11.6.65`**:
+
+- **BIOS `boot.bin` fetch** — The LiteX BIOS has the TFTP server IP baked into the bitstream at build time via the `remote_ip` parameter in `gateware/colorlight.py`. It does not use DHCP.
+- **Firmware `<mac>.yml` config fetch** — The Rust firmware also uses a hardcoded TFTP server IP for fetching per-board YAML config files at boot.
+
+This means your TFTP server **must** be running at `10.11.6.65`. The `--host-ip` flag in `build.sh` controls which local interface dnsmasq binds to, but the board will only send requests to the address compiled into the bitstream/firmware.
+
+**TODO:** Make the TFTP server IP configurable. The BIOS fetch could use a `--remote-ip` build flag. The firmware fetch should use the DHCP `siaddr` field (the patched smoltcp already exposes it as `Config.server_ip`).
 
 ## Pre-built Binaries
 
@@ -268,7 +282,7 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 | `bitstreams/96x48.bit` | FPGA bitstream for 96x48 panels |
 | `bitstreams/64x32.bit` | FPGA bitstream for 64x32 panels |
 | `bitstreams/64x64.bit` | FPGA bitstream for 64x64 panels |
-| `barsign-disp.bin` | Rust firmware binary (universal, all panels) |
+| `.tftp/boot.bin` | Rust firmware binary (universal, all panels) |
 
 ```bash
 # Flash bitstream for your panel size
@@ -282,7 +296,7 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 ## Known Issues
 
 - **Art-Net**: Palette updates work, direct pixel writes commented out
-- **TFTP server IP**: Currently hardcoded; planned to use DHCP `siaddr` field
+- **TFTP server IP**: Hardcoded to `10.11.6.65` in both BIOS and firmware (see [TFTP Server IP](#tftp-server-ip-hardcoded))
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and fixes.
 
