@@ -48,9 +48,14 @@ RUN pip3 install --no-cache-dir pypng meson ninja
 
 # Install LiteX
 WORKDIR /litex
-RUN wget -q https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py && \
+RUN wget -q https://raw.githubusercontent.com/enjoy-digital/litex/2025.12/litex_setup.py && \
     chmod +x litex_setup.py && \
-    ./litex_setup.py --init --install
+    ./litex_setup.py --init --install --tag=2025.12
+
+# Apply local patches to LiteX BIOS
+COPY patches/ /litex/patches/
+RUN cd /litex/litex && \
+    patch -p1 < /litex/patches/litex-bios-broadcast.patch
 
 # Install Rust for firmware
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \

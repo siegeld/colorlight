@@ -269,10 +269,11 @@ class BaseSoC(SoCCore):
             nrxslots=4,
             ntxslots=2,
             local_ip=ip_address,
-            remote_ip="255.255.255.255",
+            remote_ip="10.11.6.65",
         )
 
-        # Use non-standard TFTP port so only our server responds to broadcast
+        # TODO: broadcast TFTP not working yet — needs ETH_UDP_BROADCAST + BIOS patch
+        # self.add_constant("ETH_UDP_BROADCAST")
         self.add_constant("TFTP_SERVER_PORT", 6969)
 
         # Timing constraints

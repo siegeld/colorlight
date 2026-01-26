@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.1] - 2026-01-26
+
+### Changed
+- **Pin LiteX to 2025.12** — Dockerfile now fetches `litex_setup.py` from the `2025.12` tag and passes `--tag=2025.12` to ensure reproducible builds
+- **TFTP server listens on 0.0.0.0** — `build.sh` binds TFTP server to all interfaces instead of a specific host IP
+- **Rebuild bitstream and firmware** — Full rebuild with pinned LiteX to restore all network optimizations (4 RX slots, dual HTTP sockets, 32KB UDP buffer)
+
+---
+
 ## [1.3.0] - 2026-01-26
 
 ### Added
@@ -269,6 +278,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.3.1 | 2026-01-26 | Pin LiteX to 2025.12, reproducible Docker builds |
 | 1.3.0 | 2026-01-26 | BIOS broadcast TFTP on custom port 6969 |
 | 1.2.0 | 2026-01-26 | Dynamic TFTP server via DHCP siaddr/Option 66 |
 | 1.1.0 | 2026-01-26 | Web reboot button, modern dark theme, build.sh TFTP fix |

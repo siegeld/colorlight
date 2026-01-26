@@ -299,7 +299,7 @@ ensure_tftp() {
     mkdir -p "${TFTP_DIR}"
     print_step "Starting TFTP server on ${HOST_IP}"
     python3 "${SCRIPT_DIR}/tools/tftpd.py" \
-        --root "${TFTP_DIR}" --host "${HOST_IP}" --port 6969 \
+        --root "${TFTP_DIR}" --host "0.0.0.0" --port 6969 \
         --log "${TFTP_DIR}/tftpd.log" \
         --pid "${TFTP_DIR}/tftpd.pid" &
     disown
