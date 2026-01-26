@@ -56,7 +56,7 @@ def open_ffmpeg(path, width, height):
     )
 
 
-def parse_layout_dims(layout_str, panel_size_str="96x48"):
+def parse_layout_dims(layout_str, panel_size_str="128x64"):
     """Compute virtual display dimensions from layout spec and panel size."""
     pw, ph = (int(x) for x in panel_size_str.split("x"))
     cols, rows = (int(x) for x in layout_str.split("x"))
@@ -70,16 +70,16 @@ def main():
     parser.add_argument("video", help="Path to video file")
     parser.add_argument("--host", default="10.11.6.250")
     parser.add_argument("--port", type=int, default=7000)
-    parser.add_argument("--width", type=int, default=96)
-    parser.add_argument("--height", type=int, default=48)
+    parser.add_argument("--width", type=int, default=128)
+    parser.add_argument("--height", type=int, default=64)
     parser.add_argument("--fps", type=float, default=None,
                         help="Override frame rate (default: use video's native FPS)")
     parser.add_argument("--loop", action="store_true",
                         help="Loop video indefinitely")
     parser.add_argument("--layout",
                         help="Grid layout (e.g. 1x2) — overrides --width/--height")
-    parser.add_argument("--panel-size", default="96x48",
-                        help="Physical panel size (default: 96x48)")
+    parser.add_argument("--panel-size", default="128x64",
+                        help="Physical panel size (default: 128x64)")
     parser.add_argument("--chunk-delay", type=float, default=0.002,
                         help="Delay between UDP chunks in seconds (default: 0.002)")
     args = parser.parse_args()

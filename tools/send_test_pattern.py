@@ -109,8 +109,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--host", default="10.11.6.250")
     parser.add_argument("--port", type=int, default=7000)
-    parser.add_argument("--width", type=int, default=96)
-    parser.add_argument("--height", type=int, default=48)
+    parser.add_argument("--width", type=int, default=128)
+    parser.add_argument("--height", type=int, default=64)
     args = parser.parse_args()
 
     rgb_data = PATTERNS[args.pattern](args.width, args.height)

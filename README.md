@@ -77,8 +77,8 @@ The `build.sh` script simplifies the entire workflow:
 
 | Panel | Scan Rate | Notes |
 |-------|-----------|-------|
-| 96x48 | 1/24 | Default configuration |
-| 128x64 | 1/32 | Large format |
+| 128x64 | 1/32 | Default configuration |
+| 96x48 | 1/24 | Compact |
 | 64x32 | 1/16 | Compact |
 | 64x64 | 1/32 | Square format |
 
@@ -188,14 +188,13 @@ The firmware acquires its IP address via DHCP at boot. If no DHCP server respond
 
 At boot, the firmware fetches a per-board YAML config file from the TFTP server (the DHCP `siaddr`). The filename is the board's MAC address: e.g., `02-78-7b-21-ae-53.yml`.
 
-Example config for two vertically-stacked 96x48 panels:
+Example config for a single 128x64 panel:
 
 ```yaml
-grid: 1x2
-panel_width: 96
-panel_height: 48
+grid: 1x1
+panel_width: 128
+panel_height: 64
 J1: 0,0
-J2: 0,1
 ```
 
 Place config files in your TFTP root directory. The layout is applied automatically at boot.
@@ -204,7 +203,7 @@ Panel layout can also be configured at runtime via the HTTP API (`POST /api/layo
 
 ## Development
 
-See [CLAUDE.md](CLAUDE.md) for detailed development notes, debugging tips, and architecture documentation.
+See [ARCH.md](ARCH.md) for architecture details, memory map, double buffering internals, and debugging tips.
 
 ### Building from Source
 
