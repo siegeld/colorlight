@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Stream a YouTube video to the LED panel via UDP.
+
+Uses yt-dlp to resolve the stream URL and ffmpeg to decode it into raw RGB24
+frames, then sends them over the bitmap UDP protocol.
+
+Requirements: yt-dlp, ffmpeg
+  pip install yt-dlp   (or: brew install yt-dlp)
+"""
+import argparse
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+HEADER_FMT = "<2sHBBHH"
+HEADER_SIZE = struct.calcsize(HEADER_FMT)
+MAX_PAYLOAD = 1462
+PIXELS_PER_CHUNK = MAX_PAYLOAD // 3  # 487
+BYTES_PER_CHUNK = PIXELS_PER_CHUNK * 3  # 1461
+
+
+def parse_layout_dims(layout_str, panel_size_str="128x64"):
+    """Compute virtual display dimensions from layout spec and panel size."""
+    pw, ph = (int(x) for x in panel_size_str.split("x"))
+    cols, rows = (int(x) for x in layout_str.split("x"))
+    return pw * cols, ph * rows
+
+
+def resolve_stream_url(url, format_sel, cookies=None):
+    """Use yt-dlp -g to resolve the direct stream URL."""
+    cmd = ["yt-dlp", "--no-warnings", "-f", format_sel, "-g", url]
+    if cookies:
+        cmd.insert(1, "--cookies")
+        cmd.insert(2, cookies)
+    print(f"Resolving: {' '.join(cmd)}", file=sys.stderr)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        print(f"yt-dlp error: {result.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+    # -g may return multiple lines (video + audio); take the first (video)
+    stream_url = result.stdout.strip().split("\n")[0]
+    if not stream_url:
+        print("Error: yt-dlp returned no URL", file=sys.stderr)
+        sys.exit(1)
+    return stream_url
+
+
+def open_ffmpeg(stream_url, width, height, fps=None):
+    """Spawn ffmpeg to decode the resolved URL into raw RGB24 frames."""
+    cmd = [
+        "ffmpeg",
+        "-loglevel", "error",
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "5",
+        "-i", stream_url,
+        "-f", "rawvideo",
+        "-pix_fmt", "rgb24",
+        "-s", f"{width}x{height}",
+    ]
+    if fps:
+        cmd += ["-r", str(fps)]
+    cmd += ["-"]
+    return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def stream_frames(url, width, height, dest, sock, args):
+    """Resolve URL via yt-dlp, decode with ffmpeg, send frames over UDP."""
+    stream_url = resolve_stream_url(url, args.format, cookies=args.cookies)
+    print(f"Resolved stream URL ({len(stream_url)} chars)", file=sys.stderr)
+
+    proc = open_ffmpeg(stream_url, width, height, fps=args.fps)
+
+    frame_size = width * height * 3
+    frame_id = int(time.time()) & 0xFFFF
+    frame_count = 0
+    chunk_delay = args.chunk_delay
+    frame_period = 1.0 / args.fps
+    t_start = time.monotonic()
+
+    try:
+        while True:
+            t0 = time.monotonic()
+            frame_data = proc.stdout.read(frame_size)
+            if len(frame_data) < frame_size:
+                break
+
+            total_chunks = (len(frame_data) + BYTES_PER_CHUNK - 1) // BYTES_PER_CHUNK
+            for i in range(total_chunks):
+                offset = i * BYTES_PER_CHUNK
+                chunk = frame_data[offset : offset + BYTES_PER_CHUNK]
+                header = struct.pack(
+                    HEADER_FMT, b"BM", frame_id, i, total_chunks, width, height
+                )
+                sock.sendto(header + chunk, dest)
+                if i < total_chunks - 1:
+                    time.sleep(chunk_delay)
+            frame_id = (frame_id + 1) & 0xFFFF
+            frame_count += 1
+
+            if frame_count % 30 == 0:
+                elapsed = time.monotonic() - t_start
+                actual_fps = frame_count / elapsed if elapsed > 0 else 0
+                print(f"\rFrame {frame_count}  {actual_fps:.1f} fps",
+                      end="", file=sys.stderr)
+
+            elapsed = time.monotonic() - t0
+            remaining = frame_period - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+    finally:
+        proc.stdout.close()
+        proc.terminate()
+        proc.wait()
+
+    return frame_count, time.monotonic() - t_start
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Stream a YouTube video to the LED panel via UDP"
+    )
+    parser.add_argument("url", help="YouTube URL (or any yt-dlp supported URL)")
+    parser.add_argument("--host", default="10.11.6.250")
+    parser.add_argument("--port", type=int, default=7000)
+    parser.add_argument("--width", type=int, default=128)
+    parser.add_argument("--height", type=int, default=64)
+    parser.add_argument("--fps", type=float, default=15,
+                        help="Output frame rate (default: 15)")
+    parser.add_argument("--format", default="bv*",
+                        help="yt-dlp format selector (default: bv* = best video)")
+    parser.add_argument("--cookies",
+                        help="Path to cookies.txt for auth/age-gated videos")
+    parser.add_argument("--loop", action="store_true",
+                        help="Loop video indefinitely (re-resolves URL each loop)")
+    parser.add_argument("--layout",
+                        help="Grid layout (e.g. 1x2) — overrides --width/--height")
+    parser.add_argument("--panel-size", default="128x64",
+                        help="Physical panel size (default: 128x64)")
+    parser.add_argument("--chunk-delay", type=float, default=0.002,
+                        help="Delay between UDP chunks in seconds (default: 0.002)")
+    args = parser.parse_args()
+
+    if args.layout:
+        args.width, args.height = parse_layout_dims(args.layout, args.panel_size)
+
+    width, height = args.width, args.height
+    dest = (args.host, args.port)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    print(f"Streaming {args.url} -> {args.host}:{args.port} ({width}x{height})",
+          file=sys.stderr)
+
+    total_frames = 0
+    total_time = 0.0
+    loop_count = 0
+
+    try:
+        while True:
+            loop_count += 1
+            frames, elapsed = stream_frames(args.url, width, height, dest, sock, args)
+            total_frames += frames
+            total_time += elapsed
+
+            if not args.loop:
+                break
+            print(f"\nLoop {loop_count} done, restarting...", file=sys.stderr)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sock.close()
+
+    actual_fps = total_frames / total_time if total_time > 0 else 0
+    print(f"\nDone: {total_frames} frames in {total_time:.1f}s ({actual_fps:.1f} fps)",
+          file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

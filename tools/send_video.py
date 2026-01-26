@@ -72,8 +72,8 @@ def main():
     parser.add_argument("--port", type=int, default=7000)
     parser.add_argument("--width", type=int, default=128)
     parser.add_argument("--height", type=int, default=64)
-    parser.add_argument("--fps", type=float, default=None,
-                        help="Override frame rate (default: use video's native FPS)")
+    parser.add_argument("--fps", type=float, default=15,
+                        help="Output frame rate (default: 15)")
     parser.add_argument("--loop", action="store_true",
                         help="Loop video indefinitely")
     parser.add_argument("--layout",
@@ -92,7 +92,7 @@ def main():
         args.width, args.height = parse_layout_dims(args.layout, args.panel_size)
 
     # Determine frame rate
-    fps = args.fps if args.fps else get_video_fps(args.video)
+    fps = args.fps
     frame_period = 1.0 / fps
     frame_size = args.width * args.height * 3
     chunk_delay = args.chunk_delay
