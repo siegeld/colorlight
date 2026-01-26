@@ -133,8 +133,8 @@ All tools accept `--host <ip>` (default: `10.11.6.250`), `--port` (default: `700
 Send any image file (PNG, JPEG, etc.) to the panel. Auto-resized to panel dimensions. Requires Pillow.
 
 ```bash
-python tools/send_image.py photo.png --host 10.11.6.70
-python tools/send_image.py photo.png --host 10.11.6.70 --layout 2x1
+python tools/send_image.py --host 10.11.6.70 photo.png
+python tools/send_image.py --host 10.11.6.70 --layout 2x1 photo.png
 ```
 
 ### send_video.py — Video File
@@ -142,9 +142,9 @@ python tools/send_image.py photo.png --host 10.11.6.70 --layout 2x1
 Stream a local video file to the panel. Requires ffmpeg.
 
 ```bash
-python tools/send_video.py clip.mp4 --host 10.11.6.70
-python tools/send_video.py clip.mp4 --host 10.11.6.70 --fps 15 --loop
-python tools/send_video.py clip.mp4 --host 10.11.6.70 --layout 1x2 --chunk-delay 0.003
+python tools/send_video.py --host 10.11.6.70 clip.mp4
+python tools/send_video.py --host 10.11.6.70 --fps 15 --loop clip.mp4
+python tools/send_video.py --host 10.11.6.70 --layout 1x2 --chunk-delay 0.003 clip.mp4
 ```
 
 ### send_youtube.py — YouTube / Web Video
@@ -152,11 +152,11 @@ python tools/send_video.py clip.mp4 --host 10.11.6.70 --layout 1x2 --chunk-delay
 Stream a YouTube video (or any [yt-dlp supported URL](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)) directly to the panel — no file is downloaded. Requires yt-dlp and ffmpeg.
 
 ```bash
-python tools/send_youtube.py "https://youtube.com/watch?v=ID" --host 10.11.6.70
-python tools/send_youtube.py "https://youtube.com/watch?v=ID" --host 10.11.6.70 --loop
+python tools/send_youtube.py --host 10.11.6.70 "https://youtube.com/watch?v=ID"
+python tools/send_youtube.py --host 10.11.6.70 --loop "https://youtube.com/watch?v=ID"
 
 # Age-gated / auth videos (export cookies.txt from your browser)
-python tools/send_youtube.py "URL" --host 10.11.6.70 --cookies cookies.txt
+python tools/send_youtube.py --host 10.11.6.70 --cookies cookies.txt "URL"
 ```
 
 ### send_test_pattern.py — Test Patterns
@@ -164,8 +164,8 @@ python tools/send_youtube.py "URL" --host 10.11.6.70 --cookies cookies.txt
 Generate and send a test pattern. Available: `gradient`, `bars`, `rainbow`, `heart`.
 
 ```bash
-python tools/send_test_pattern.py rainbow --host 10.11.6.70
-python tools/send_test_pattern.py heart --host 10.11.6.70
+python tools/send_test_pattern.py --host 10.11.6.70 rainbow
+python tools/send_test_pattern.py --host 10.11.6.70 heart
 ```
 
 ### send_animation.py — Animated Patterns
@@ -173,8 +173,8 @@ python tools/send_test_pattern.py heart --host 10.11.6.70
 Send a looping animated pattern. Available: `heart` (pulsing).
 
 ```bash
-python tools/send_animation.py heart --host 10.11.6.70
-python tools/send_animation.py heart --host 10.11.6.70 --fps 30 --loops 0
+python tools/send_animation.py --host 10.11.6.70 heart
+python tools/send_animation.py --host 10.11.6.70 --fps 30 --loops 0 heart
 ```
 
 ## Telnet Commands
