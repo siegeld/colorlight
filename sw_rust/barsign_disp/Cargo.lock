@@ -104,7 +104,7 @@ checksum = "f8fe8f5a8a398345e52358e18ff07cc17a568fbca5c6f73873d3a62056309603"
 
 [[package]]
 name = "barsign-disp"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "embedded-hal 0.2.5",
  "heapless",
@@ -696,8 +696,6 @@ dependencies = [
 [[package]]
 name = "smoltcp"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2308a1657c8db1f5b4993bab4e620bdbe5623bd81f254cf60326767bb243237"
 dependencies = [
  "bitflags",
  "byteorder",

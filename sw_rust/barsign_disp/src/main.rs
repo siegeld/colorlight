@@ -223,10 +223,24 @@ fn main() -> ! {
                         });
                         if let Some(router) = config.router {
                             iface.routes_mut().add_default_ipv4_route(router).ok();
-                            // Start TFTP config load from gateway
+                        }
+                        // Start TFTP config load from build host
+                        {
+                            let server = Ipv4Address([10, 11, 6, 65]);
                             if !tftp_loader.is_active() && !tftp_loader.is_done() {
-                                writeln!(r.context.output, "TFTP: fetching layout.cfg from {}", router).ok();
-                                tftp_loader.start(router);
+                                // Build MAC-based filename: 02-78-7b-21-ae-53.yml
+                                let m = &r.context.mac;
+                                let mut fname = [0u8; 21]; // "xx-xx-xx-xx-xx-xx.yml"
+                                const HEX: &[u8; 16] = b"0123456789abcdef";
+                                for i in 0..6 {
+                                    fname[i * 3] = HEX[(m[i] >> 4) as usize];
+                                    fname[i * 3 + 1] = HEX[(m[i] & 0xf) as usize];
+                                    if i < 5 { fname[i * 3 + 2] = b'-'; }
+                                }
+                                fname[17..21].copy_from_slice(b".yml");
+                                let fname_str = core::str::from_utf8(&fname).unwrap_or("config.yml");
+                                writeln!(r.context.output, "TFTP: fetching {} from {}", fname_str, server).ok();
+                                tftp_loader.start(server, fname_str);
                             }
                         }
                     }
@@ -258,11 +272,17 @@ fn main() -> ! {
             if tftp_loader.poll(socket, time_ms) {
                 // Config loaded — parse and apply layout
                 if let Some(layout) = tftp_loader.parse_config() {
+                    let w = layout.virtual_width();
+                    let h = layout.virtual_height();
                     writeln!(r.context.output, "TFTP: layout {}x{} ({}x{} virtual)",
-                        layout.grid_cols, layout.grid_rows,
-                        layout.virtual_width(), layout.virtual_height()).ok();
+                        layout.grid_cols, layout.grid_rows, w, h).ok();
                     layout.apply(&mut r.context.hub75);
                     r.context.layout = layout;
+                    // Redraw at new virtual size
+                    let total = (w as u32) * (h as u32);
+                    r.context.hub75.set_img_param(w, total as u32);
+                    r.context.hub75.write_img_data(0, patterns::grid(w, h));
+                    r.context.hub75.swap_buffers();
                 } else {
                     writeln!(r.context.output, "TFTP: failed to parse layout.cfg").ok();
                 }

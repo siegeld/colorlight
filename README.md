@@ -9,11 +9,13 @@ A complete FPGA-based LED panel controller for **HUB75** displays, built on the 
 ## Features
 
 - **HUB75 LED Panel Driver** - Supports up to 8 output chains, 4 panels per chain
-- **Ethernet Connectivity** - Static IP, ARP, ICMP (ping), TCP
+- **DHCP Networking** - Automatic IP via DHCP with unique MAC from SPI flash
+- **TFTP Boot Config** - Per-board YAML layout config fetched at boot via `<mac>.yml`
+- **HTTP REST API** - Web status page and JSON API on port 80
+- **Bitmap UDP Protocol** - Send RGB images over UDP port 7000
 - **Telnet Console** - Remote configuration and management on port 23
-- **Art-Net Support** - DMX over Ethernet for real-time control (UDP port 6454)
-- **Dual Display Modes** - Full-color (24-bit) and indexed (8-bit with palette)
-- **Persistent Storage** - Save/load images and configuration to SPI flash
+- **Double-Buffered Animation** - Tear-free 30fps display updates
+- **Multi-Panel Virtual Display** - Configurable grid layout across multiple panels
 - **Rust Firmware** - Type-safe embedded development with smoltcp TCP/IP stack
 
 ## Hardware Requirements
@@ -89,9 +91,11 @@ docker run --rm -v "$(pwd):/project" litex-hub75 \
 #### 3. Program the FPGA
 
 ```bash
-# Flash bitstream to SPI (persistent)
+# Flash bitstream to SPI (persistent across power cycles)
+# NOTE: --board colorlight is required for correct flash chip handling
 docker run --rm -v "$(pwd):/project" -v /dev/bus/usb:/dev/bus/usb --privileged \
-    litex-hub75 "openFPGALoader --cable usb-blaster -f --unprotect-flash \
+    litex-hub75 "openFPGALoader --board colorlight --cable usb-blaster \
+    -f --unprotect-flash \
     /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
 
 # Or load to SRAM (temporary, for testing)
@@ -103,11 +107,14 @@ docker run --rm -v "$(pwd):/project" -v /dev/bus/usb:/dev/bus/usb --privileged \
 ### Test Connection
 
 ```bash
-# Test ping
-ping 10.11.6.250
+# Test ping (IP assigned by DHCP — check your DHCP server for the lease)
+ping <board-ip>
 
 # Connect via telnet
-telnet 10.11.6.250 23
+telnet <board-ip> 23
+
+# View web status page
+curl http://<board-ip>/
 ```
 
 ## Project Structure
@@ -118,13 +125,13 @@ colorlight/
 ├── colorlight.py          # LiteX SoC definition
 ├── hub75.py               # HUB75 display driver (gateware)
 ├── gen_test_image.py      # Test pattern generator
-├── smoleth.py             # Ethernet module
 ├── Dockerfile             # Build environment
 ├── sw_rust/               # Rust firmware
 │   ├── barsign_disp/      # Main application
-│   └── litex-pac/         # Peripheral Access Crate
-├── scripts/               # Helper scripts
-├── legacy/                # Archived old projects
+│   ├── litex-pac/         # Peripheral Access Crate
+│   └── smoltcp-0.8.0/     # Patched smoltcp (DHCP siaddr support)
+├── tools/                 # Python tools (send_image, send_animation, etc.)
+├── .tftp/                 # TFTP-served config files (<mac>.yml)
 ├── CLAUDE.md              # Development context
 └── CHANGELOG.md           # Version history
 ```
@@ -157,19 +164,27 @@ Connect via `telnet <ip> 23` to access the management console:
 
 ## Configuration
 
-### IP Address
+### IP Address (DHCP)
 
-Edit the IP in `sw_rust/barsign_disp/src/main.rs`:
+The firmware acquires its IP address via DHCP at boot. If no DHCP server responds within 10 seconds, it falls back to `10.11.6.250/24`. Check your DHCP server's lease table to find the board's IP, or use the board's MAC address (`02:xx:xx:xx:xx:xx`) to assign a fixed lease.
 
-```rust
-let ip_data = IpData {
-    ip: [10, 11, 6, 250],  // Change this
-};
+### Panel Layout (TFTP Boot Config)
+
+At boot, the firmware fetches a per-board YAML config file from the TFTP server (the DHCP `siaddr`). The filename is the board's MAC address: e.g., `02-78-7b-21-ae-53.yml`.
+
+Example config for two vertically-stacked 96x48 panels:
+
+```yaml
+grid: 1x2
+panel_width: 96
+panel_height: 48
+J1: 0,0
+J2: 0,1
 ```
 
-### Panel Layout
+Place config files in your TFTP root directory. The layout is applied automatically at boot.
 
-Configure via telnet or edit defaults in firmware. Each output supports a chain of up to 4 panels with configurable X, Y position and rotation.
+Panel layout can also be configured at runtime via the HTTP API (`POST /api/layout`) or telnet commands.
 
 ## Development
 
@@ -193,10 +208,40 @@ ping <board-ip>
 telnet <board-ip> 23
 ```
 
+## Boot Workflow
+
+1. **Power on** — BIOS loads bitstream from SPI flash
+2. **BIOS TFTP** — BIOS fetches `boot.bin` firmware from TFTP server
+3. **Firmware starts** — DHCP acquires IP and unique MAC from flash UID
+4. **Config fetch** — Firmware fetches `<mac>.yml` from TFTP server
+5. **Layout applied** — Panel grid configured and display redrawn
+
+The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot.
+
+## Pre-built Binaries
+
+The repo includes pre-built binaries so you can flash and boot without rebuilding:
+
+| File | Description |
+|------|-------------|
+| `colorlight.bit` | FPGA bitstream for Colorlight 5A-75E v8.2 |
+| `barsign-disp.bin` | Rust firmware binary (rename to `boot.bin` for TFTP) |
+
+```bash
+# Flash bitstream permanently
+./build.sh flash
+
+# Or flash manually (--board colorlight is required)
+openFPGALoader --board colorlight --cable usb-blaster -f --unprotect-flash colorlight.bit
+
+# Serve firmware via TFTP
+cp barsign-disp.bin /path/to/tftp/boot.bin
+```
+
 ## Known Issues
 
-- **Flash boot**: Currently requires TFTP boot on rev 8.2 boards (flash chip mismatch)
 - **Art-Net**: Palette updates work, direct pixel writes commented out
+- **TFTP server IP**: Currently hardcoded; planned to use DHCP `siaddr` field
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and fixes.
 

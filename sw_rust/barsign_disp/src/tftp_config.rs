@@ -31,6 +31,8 @@ pub struct TftpConfigLoader {
     deadline_ms: i64,
     buf: [u8; MAX_CONFIG_SIZE],
     len: usize,
+    filename: [u8; 32],
+    filename_len: usize,
 }
 
 impl TftpConfigLoader {
@@ -43,15 +45,20 @@ impl TftpConfigLoader {
             deadline_ms: 0,
             buf: [0u8; MAX_CONFIG_SIZE],
             len: 0,
+            filename: [0u8; 32],
+            filename_len: 0,
         }
     }
 
     /// Start a TFTP config fetch from the given gateway.
-    pub fn start(&mut self, gateway: Ipv4Address) {
+    pub fn start(&mut self, gateway: Ipv4Address, filename: &str) {
         self.gateway = gateway;
         self.server_tid = 0;
         self.block = 1;
         self.len = 0;
+        let n = filename.len().min(32);
+        self.filename[..n].copy_from_slice(&filename.as_bytes()[..n]);
+        self.filename_len = n;
         self.state = TftpState::SendRrq;
     }
 
@@ -75,9 +82,9 @@ impl TftpConfigLoader {
                 }
                 if socket.can_send() {
                     // Build RRQ: opcode(2) + filename + NUL + "octet" + NUL
-                    let filename = b"layout.cfg";
+                    let filename = &self.filename[..self.filename_len];
                     let mode = b"octet";
-                    let mut pkt = [0u8; 32];
+                    let mut pkt = [0u8; 48];
                     pkt[0] = 0;
                     pkt[1] = OPCODE_RRQ;
                     let mut pos = 2;

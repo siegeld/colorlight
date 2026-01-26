@@ -8,9 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Fix SPI flash boot for rev 8.2 boards (update flash chip from GD25Q16 to W25Q32JV)
+- Replace hardcoded TFTP server IP with DHCP `siaddr` (patched smoltcp exposes it)
 - Re-enable Art-Net direct pixel writes
 - Add serial console support documentation
+
+---
+
+## [0.2.7] - 2026-01-25
+
+### Added
+- **TFTP boot config** — Firmware fetches `<mac-address>.yml` (e.g., `02-78-7b-21-ae-53.yml`) from TFTP server at boot
+  - Simple YAML layout config: `grid`, `panel_width`, `panel_height`, `J1`..`J8` mappings
+  - Automatically applies layout and redraws display at new virtual size after config load
+- **Patched smoltcp** — Local patch adds `server_ip` (DHCP `siaddr`) to `Dhcpv4Config` for TFTP server discovery
+- **Persistent bitstream flash** — `./build.sh flash` now uses `--board colorlight` flag for reliable SPI flash writes (seconds instead of hours)
+
+### Changed
+- `build.sh` — TFTP server stays running after `boot` (firmware needs it for config fetch); `flash` uses `--board colorlight` for correct flash chip handling
+- `tftp_config.rs` — Accepts dynamic filename instead of hardcoded `layout.cfg`
+- `layout.rs` — Parses YAML-style `key: value` separators in addition to `key=value`
+- `http.rs` — Web page title renamed from "Barsign" to "Colorlight"
+
+### Fixed
+- **Flash programming speed** — `--board colorlight` flag tells openFPGALoader the correct flash chip, eliminating timeout/retry on every sector write
 
 ---
 
@@ -160,6 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.7 | 2026-01-25 | TFTP boot config, persistent flash, YAML layout |
 | 0.2.6 | 2026-01-25 | HTTP REST API with dual-socket refresh fix |
 | 0.2.5 | 2026-01-25 | DHCP client with unique MAC from SPI flash |
 | 0.2.4 | 2026-01-25 | Bitmap UDP protocol for sending images |

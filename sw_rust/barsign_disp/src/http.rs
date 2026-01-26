@@ -185,9 +185,9 @@ fn page_status(resp: &mut HttpResponse, ctx: &mut Context, ip: [u8; 4]) {
     write!(resp, "\
 <!DOCTYPE html><html><head>\
 <meta charset=utf-8><link rel=icon href='data:,'>\
-<title>Barsign</title>\
+<title>Colorlight</title>\
 <style>body{{font:14px monospace;margin:20px}}td{{padding:2px 8px}}</style>\
-</head><body><h2>Barsign Status</h2><table>").ok();
+</head><body><h2>Colorlight Status</h2><table>").ok();
     write!(resp, "<tr><td>MAC</td><td>{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}</td></tr>",
         m[0], m[1], m[2], m[3], m[4], m[5]).ok();
     write!(resp, "<tr><td>IP</td><td>{}.{}.{}.{}</td></tr>",

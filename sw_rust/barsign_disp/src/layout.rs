@@ -67,9 +67,12 @@ impl LayoutConfig {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            if let Some(pos) = line.find('=') {
+            // Accept both "key=value" and YAML-style "key: value"
+            let sep = line.find('=').or_else(|| line.find(": "));
+            if let Some(pos) = sep {
+                let skip = if line.as_bytes().get(pos) == Some(&b':') { 2 } else { 1 };
                 let key = line[..pos].trim();
-                let value = line[pos + 1..].trim();
+                let value = line[pos + skip..].trim();
                 match key {
                     "grid" => {
                         if let Some((cols, rows)) = parse_grid(value) {

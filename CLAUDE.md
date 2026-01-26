@@ -15,7 +15,8 @@
 | Animation | Working | 30fps double-buffered via fb_base CSR |
 | HTTP API | Working | Port 80, status page + REST API, dual-socket for fast refresh |
 | Bitmap UDP | Working | Port 7000, chunked RGB images, Python sender tools |
-| Flash Boot | **Broken** | Needs flash chip update for rev 8.2 |
+| TFTP Config | Working | MAC-based YAML config fetched at boot via TFTP |
+| Flash Boot | TFTP only | Bitstream persists in flash; firmware loaded via TFTP boot |
 | Art-Net | Partial | Palette works, pixels disabled |
 
 ## Architecture
@@ -70,8 +71,12 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | `sw_rust/barsign_disp/src/menu.rs` | Telnet CLI commands (pattern, quit, animation) |
 | `sw_rust/barsign_disp/src/flash_id.rs` | Read SPI flash unique ID, derive MAC address |
 | `sw_rust/barsign_disp/src/patterns.rs` | Test pattern generators (grid, rainbow, animated_rainbow) |
+| `sw_rust/barsign_disp/src/tftp_config.rs` | TFTP client for fetching MAC-based YAML config at boot |
+| `sw_rust/barsign_disp/src/layout.rs` | Panel layout config parser (YAML `key: value` and `key=value`) |
 | `sw_rust/barsign_disp/src/ethernet.rs` | smoltcp device driver |
+| `sw_rust/smoltcp-0.8.0/` | Patched smoltcp: exposes DHCP `siaddr` as `Config.server_ip` |
 | `sw_rust/litex-pac/` | Generated peripheral access crate |
+| `.tftp/` | TFTP root: `boot.bin` (firmware) + `<mac>.yml` (per-board config) |
 | `tools/send_image.py` | Send image files to panel via UDP port 7000 |
 | `tools/send_test_pattern.py` | Generate and send test patterns (gradient, bars, rainbow, heart) |
 | `tools/send_animation.py` | Send animated patterns (pulsing heart) at configurable FPS |
@@ -95,9 +100,9 @@ docker run --rm -v "$(pwd):/project" litex-hub75 \
      svd2rust -i colorlight.svd --target riscv && \
      rm -rf src && form -i lib.rs -o src && rm lib.rs"
 
-# Flash bitstream
+# Flash bitstream (use --board colorlight for correct flash chip handling)
 docker run --rm -v "$(pwd):/project" -v /dev/bus/usb:/dev/bus/usb --privileged \
-    litex-hub75 "openFPGALoader --cable usb-blaster -f --unprotect-flash \
+    litex-hub75 "openFPGALoader --board colorlight --cable usb-blaster -f --unprotect-flash \
     /project/build/colorlight_5a_75e/gateware/colorlight_5a_75e.bit"
 
 # Load to SRAM (temporary)

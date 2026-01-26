@@ -190,7 +190,7 @@ program_flash() {
     print_step "Flashing bitstream to SPI flash via ${CABLE}"
     print_warning "This will persist across power cycles"
 
-    docker_run_usb "openFPGALoader --cable ${CABLE} -f --unprotect-flash /project/${BITSTREAM}"
+    docker_run_usb "openFPGALoader --board colorlight --cable ${CABLE} -f --unprotect-flash /project/${BITSTREAM}"
 
     print_success "Bitstream written to flash"
 }
@@ -329,10 +329,9 @@ do_boot() {
         print_warning "Board not responding to ping (may need more time)"
     fi
 
-    # Stop TFTP server - transfer is complete
+    # Keep TFTP server running — firmware fetches config after DHCP
     echo ""
-    stop_tftp
-    print_success "Boot complete"
+    print_success "Boot complete (TFTP server still running for config — './build.sh stop' to stop)"
 }
 
 do_stop() {
