@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.8] - 2026-01-25
+
+### Added
+- **Web pattern selector** — Dropdown on HTTP status page to load test patterns (grid, rainbow, rainbow_anim, white, red, green, blue) directly from the browser
+- **JTAG pinout in README** — Documented J27-J34 programmer connection pins
+
+---
+
 ## [0.2.7] - 2026-01-25
 
 ### Added
@@ -180,6 +188,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.8 | 2026-01-25 | Web pattern selector, JTAG pinout docs |
 | 0.2.7 | 2026-01-25 | TFTP boot config, persistent flash, YAML layout |
 | 0.2.6 | 2026-01-25 | HTTP REST API with dual-socket refresh fix |
 | 0.2.5 | 2026-01-25 | DHCP client with unique MAC from SPI flash |

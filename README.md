@@ -27,6 +27,22 @@ A complete FPGA-based LED panel controller for **HUB75** displays, built on the 
 | LED Panels | HUB75/HUB75E compatible (96x48, 128x64, 64x32, 64x64) |
 | Network | 100Mbps Ethernet |
 
+### JTAG Pinout
+
+JTAG is available on a 4-pin header next to the FPGA (U33). VCC/GND are on a separate 2-pin header nearby.
+
+| Pin | Function |
+|-----|----------|
+| J27 | TCK      |
+| J31 | TMS      |
+| J32 | TDI      |
+| J30 | TDO      |
+|     |          |
+| J33 | 3.3V     |
+| J34 | GND      |
+
+Connect these to your USB Blaster or FTDI programmer's corresponding JTAG signals.
+
 ## Quick Start
 
 ### Prerequisites

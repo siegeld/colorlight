@@ -211,7 +211,21 @@ fn page_status(resp: &mut HttpResponse, ctx: &mut Context, ip: [u8; 4]) {
             }
         }
     }
-    write!(resp, "</table><h3>API</h3><ul>\
+    write!(resp, "</table><h3>Pattern</h3>\
+<select id=pat>\
+<option>grid</option>\
+<option>rainbow</option>\
+<option>rainbow_anim</option>\
+<option>white</option>\
+<option>red</option>\
+<option>green</option>\
+<option>blue</option>\
+</select> \
+<button onclick=\"fetch('/api/display/pattern',{{method:'POST',headers:{{'Content-Type':'application/json'}},\
+body:JSON.stringify({{name:document.getElementById('pat').value}})}}).then(r=>r.json()).then(j=>{{document.getElementById('msg').textContent=j.ok?'Loaded!':'Error'}}\
+).catch(()=>{{document.getElementById('msg').textContent='Failed'}})\">Load</button> \
+<span id=msg></span>\
+<h3>API</h3><ul>\
 <li><a href=/api/status>/api/status</a></li>\
 <li><a href=/api/layout>/api/layout</a></li>\
 <li><a href=/api/display>/api/display</a></li>\
