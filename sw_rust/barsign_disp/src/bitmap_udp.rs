@@ -17,7 +17,7 @@ pub struct BitmapStats {
     pub last_width: u16,
     pub last_height: u16,
     pub last_data_len: u16,
-    pub chunks_received: u16,
+    pub chunks_received: u32,
 }
 
 impl BitmapStats {
@@ -41,7 +41,7 @@ impl BitmapStats {
 
 pub struct BitmapReceiver {
     current_frame_id: u16,
-    chunks_received: u16, // bitmask, supports up to 16 chunks
+    chunks_received: u32, // bitmask, supports up to 32 chunks
     total_chunks: u8,
     width: u16,
     height: u16,
@@ -88,7 +88,7 @@ impl BitmapReceiver {
         self.stats.last_width = width;
         self.stats.last_height = height;
 
-        if total_chunks == 0 || chunk_index >= total_chunks || total_chunks > 16 {
+        if total_chunks == 0 || chunk_index >= total_chunks || total_chunks > 32 {
             self.stats.packets_bad_header += 1;
             return false;
         }
@@ -121,7 +121,7 @@ impl BitmapReceiver {
         self.stats.chunks_received = self.chunks_received;
 
         // Check if all chunks received
-        let expected_mask = (1u16 << self.total_chunks) - 1;
+        let expected_mask = (1u32 << self.total_chunks) - 1;
         let complete = self.chunks_received == expected_mask;
         if complete {
             self.stats.frames_completed += 1;

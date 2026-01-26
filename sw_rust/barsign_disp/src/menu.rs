@@ -5,6 +5,7 @@ use crate::bitmap_udp::BitmapStats;
 use crate::hal;
 use crate::hub75::{Hub75, OutputMode};
 use crate::img_flash::Flash;
+use crate::layout::LayoutConfig;
 use heapless::Vec;
 use litex_pac as pac;
 pub use menu::Runner;
@@ -43,6 +44,7 @@ pub struct Context {
     pub quit: bool,
     pub debug: bool,
     pub bitmap_stats: BitmapStats,
+    pub layout: LayoutConfig,
 }
 
 impl Context {
@@ -174,7 +176,7 @@ pub const ROOT_MENU: Menu<Context> = Menu {
                 ],
             },
             command: "get_panel_param",
-            help: Some("Get virtual location of panel in 32 increments"),
+            help: Some("Get virtual location of panel in 16 increments"),
         },
         &Item {
             item_type: ItemType::Callback {
@@ -190,11 +192,11 @@ pub const ROOT_MENU: Menu<Context> = Menu {
                     },
                     Parameter::Mandatory {
                         parameter_name: "x",
-                        help: Some("x offset in steps of 32"),
+                        help: Some("x offset in steps of 16"),
                     },
                     Parameter::Mandatory {
                         parameter_name: "y",
-                        help: Some("y offset in steps of 32"),
+                        help: Some("y offset in steps of 16"),
                     },
                     Parameter::Mandatory {
                         parameter_name: "rotation",
@@ -203,7 +205,7 @@ pub const ROOT_MENU: Menu<Context> = Menu {
                 ],
             },
             command: "set_panel_param",
-            help: Some("Set virtual location of panel in 32 increments"),
+            help: Some("Set virtual location of panel in 16 increments"),
         },
         &Item {
             item_type: ItemType::Callback {
@@ -241,6 +243,36 @@ pub const ROOT_MENU: Menu<Context> = Menu {
             },
             command: "debug",
             help: Some("Toggle debug output on/off"),
+        },
+        &Item {
+            item_type: ItemType::Callback {
+                function: layout_cmd,
+                parameters: &[
+                    Parameter::Mandatory {
+                        parameter_name: "action",
+                        help: Some("ColsxRows (e.g. 2x1), show, or apply"),
+                    },
+                ],
+            },
+            command: "layout",
+            help: Some("Set/show/apply multi-panel layout"),
+        },
+        &Item {
+            item_type: ItemType::Callback {
+                function: panel_cmd,
+                parameters: &[
+                    Parameter::Mandatory {
+                        parameter_name: "output",
+                        help: Some("J1-J8 or show"),
+                    },
+                    Parameter::Optional {
+                        parameter_name: "pos",
+                        help: Some("col,row (e.g. 1,0)"),
+                    },
+                ],
+            },
+            command: "panel",
+            help: Some("Assign panel output to grid position"),
         },
     ],
     entry: None,
@@ -526,7 +558,7 @@ fn bitmap_status(
     writeln!(context.output, "  last chunk: {}/{}", s.last_chunk_index, s.last_total_chunks).unwrap();
     writeln!(context.output, "  last size: {}x{}", s.last_width, s.last_height).unwrap();
     writeln!(context.output, "  last data len: {}", s.last_data_len).unwrap();
-    writeln!(context.output, "  chunks_received: 0b{:016b}", s.chunks_received).unwrap();
+    writeln!(context.output, "  chunks_received: 0b{:032b}", s.chunks_received).unwrap();
 }
 
 fn debug_toggle(
@@ -540,6 +572,118 @@ fn debug_toggle(
         writeln!(context.output, "Debug ON").unwrap();
     } else {
         writeln!(context.output, "Debug OFF").unwrap();
+    }
+}
+
+fn layout_cmd(
+    _menu: &Menu<Context>,
+    item: &Item<Context>,
+    args: &[&str],
+    context: &mut Context,
+) {
+    let action: &str = argument_finder(item, args, "action").unwrap().unwrap();
+    match action {
+        "show" => {
+            let l = &context.layout;
+            writeln!(
+                context.output,
+                "Grid: {}x{} ({}x{} virtual, panel {}x{})",
+                l.grid_cols, l.grid_rows,
+                l.virtual_width(), l.virtual_height(),
+                l.panel_width, l.panel_height
+            ).unwrap();
+            for (i, a) in l.assignments.iter().enumerate() {
+                if let Some((col, row)) = a {
+                    writeln!(context.output, "  J{} -> ({},{})", i + 1, col, row).unwrap();
+                }
+            }
+        }
+        "apply" => {
+            context.layout.apply(&mut context.hub75);
+            let l = &context.layout;
+            write!(context.output, "Applied: {}x{}", l.virtual_width(), l.virtual_height()).unwrap();
+            for (i, a) in l.assignments.iter().enumerate() {
+                if let Some((col, row)) = a {
+                    write!(context.output, " J{}=({},{})", i + 1, col, row).unwrap();
+                }
+            }
+            writeln!(context.output).unwrap();
+        }
+        _ => {
+            // Try parsing as grid spec (e.g. "2x1")
+            if let Some((cols, rows)) = crate::layout::parse_grid_spec(action) {
+                context.layout.grid_cols = cols;
+                context.layout.grid_rows = rows;
+                writeln!(
+                    context.output,
+                    "Grid: {}x{} ({}x{} virtual)",
+                    cols, rows,
+                    context.layout.virtual_width(), context.layout.virtual_height()
+                ).unwrap();
+            } else {
+                writeln!(context.output, "Usage: layout <ColsxRows|show|apply>").unwrap();
+            }
+        }
+    }
+}
+
+fn panel_cmd(
+    _menu: &Menu<Context>,
+    item: &Item<Context>,
+    args: &[&str],
+    context: &mut Context,
+) {
+    let output_arg: &str = argument_finder(item, args, "output").unwrap().unwrap();
+
+    if output_arg == "show" {
+        for (i, a) in context.layout.assignments.iter().enumerate() {
+            match a {
+                Some((col, row)) => {
+                    writeln!(context.output, "J{}: ({},{})", i + 1, col, row).unwrap();
+                }
+                None => {
+                    writeln!(context.output, "J{}: (unassigned)", i + 1).unwrap();
+                }
+            }
+        }
+        return;
+    }
+
+    // Parse J# output number
+    let output_num = if let Some(rest) = output_arg.strip_prefix('J') {
+        match rest.parse::<u8>() {
+            Ok(n) if n >= 1 && n <= 8 => n,
+            _ => {
+                writeln!(context.output, "Invalid output: {} (use J1-J8)", output_arg).unwrap();
+                return;
+            }
+        }
+    } else {
+        writeln!(context.output, "Invalid output: {} (use J1-J8 or show)", output_arg).unwrap();
+        return;
+    };
+
+    let pos_arg = argument_finder(item, args, "pos").unwrap();
+    match pos_arg {
+        Some(pos_str) => {
+            if let Some((col, row)) = crate::layout::parse_pos_spec(pos_str) {
+                context.layout.assignments[(output_num - 1) as usize] = Some((col, row));
+                writeln!(context.output, "J{} -> ({},{})", output_num, col, row).unwrap();
+            } else {
+                writeln!(context.output, "Invalid position: {} (use col,row)", pos_str).unwrap();
+            }
+        }
+        None => {
+            // No position given: show current assignment
+            match context.layout.assignments[(output_num - 1) as usize] {
+                Some((col, row)) => {
+                    writeln!(context.output, "J{}: ({},{})", output_num, col, row).unwrap();
+                }
+                None => {
+                    writeln!(context.output, "J{}: (unassigned)", output_num).unwrap();
+                }
+            }
+        }
     }
 }
 

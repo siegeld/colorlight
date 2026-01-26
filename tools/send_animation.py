@@ -33,6 +33,13 @@ ANIMATIONS = {
 }
 
 
+def parse_layout_dims(layout_str, panel_size_str="96x48"):
+    """Compute virtual display dimensions from layout spec and panel size."""
+    pw, ph = (int(x) for x in panel_size_str.split("x"))
+    cols, rows = (int(x) for x in layout_str.split("x"))
+    return pw * cols, ph * rows
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Send an animated pattern to the LED panel"
@@ -48,7 +55,18 @@ if __name__ == "__main__":
     parser.add_argument("--height", type=int, default=48)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--loops", type=int, default=3, help="Number of loops (0=infinite)")
+    parser.add_argument(
+        "--layout",
+        help="Grid layout (e.g. 2x1) — overrides --width/--height",
+    )
+    parser.add_argument(
+        "--panel-size",
+        default="96x48",
+        help="Physical panel size (default: 96x48)",
+    )
     args = parser.parse_args()
+    if args.layout:
+        args.width, args.height = parse_layout_dims(args.layout, args.panel_size)
 
     print(f"Generating '{args.animation}' frames...")
     frames = ANIMATIONS[args.animation](args.width, args.height, fps=args.fps)

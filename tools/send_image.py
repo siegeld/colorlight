@@ -36,6 +36,13 @@ def send_image(host, port, image_path, width=96, height=48, frame_id=None):
     print(f"Sent {image_path} ({width}x{height}) in {total_chunks} chunks")
 
 
+def parse_layout_dims(layout_str, panel_size_str="96x48"):
+    """Compute virtual display dimensions from layout spec and panel size."""
+    pw, ph = (int(x) for x in panel_size_str.split("x"))
+    cols, rows = (int(x) for x in layout_str.split("x"))
+    return pw * cols, ph * rows
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Send a bitmap image to the LED panel")
     parser.add_argument("image", help="Path to image file")
@@ -43,5 +50,16 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=7000)
     parser.add_argument("--width", type=int, default=96)
     parser.add_argument("--height", type=int, default=48)
+    parser.add_argument(
+        "--layout",
+        help="Grid layout (e.g. 2x1) — overrides --width/--height",
+    )
+    parser.add_argument(
+        "--panel-size",
+        default="96x48",
+        help="Physical panel size (default: 96x48)",
+    )
     args = parser.parse_args()
+    if args.layout:
+        args.width, args.height = parse_layout_dims(args.layout, args.panel_size)
     send_image(args.host, args.port, args.image, args.width, args.height)

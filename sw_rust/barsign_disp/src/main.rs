@@ -12,8 +12,10 @@ use embedded_hal::serial::Read;
 use ethernet::Eth;
 use hal::*;
 use heapless::Vec;
+use layout::LayoutConfig;
 use litex_pac as pac;
 use riscv_rt::entry;
+use tftp_config::TftpConfigLoader;
 use smoltcp::iface::{InterfaceBuilder, NeighborCache, Routes};
 use smoltcp::socket::{
     Dhcpv4Event, Dhcpv4Socket, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket,
@@ -63,7 +65,7 @@ fn main() -> ! {
     let mut ip_addrs = [IpCidr::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0)];
     let mut routes_storage = [None; 1];
     let routes = Routes::new(&mut routes_storage[..]);
-    let mut sockets_entries: [_; 4] = Default::default();
+    let mut sockets_entries: [_; 5] = Default::default();
     let mut iface = InterfaceBuilder::new(device, &mut sockets_entries[..])
         .hardware_addr(EthernetAddress::from_bytes(&mac_bytes).into())
         .neighbor_cache(neighbor_cache)
@@ -107,11 +109,26 @@ fn main() -> ! {
         UdpSocket::new(rx, tx)
     };
 
+    let tftp_udp_socket = {
+        static mut TFTP_UDP_RX_DATA: [u8; 1024] = [0; 1024];
+        static mut TFTP_UDP_TX_DATA: [u8; 128] = [0; 128];
+        static mut TFTP_UDP_RX_META: [UdpPacketMetadata; 4] = [UdpPacketMetadata::EMPTY; 4];
+        static mut TFTP_UDP_TX_META: [UdpPacketMetadata; 4] = [UdpPacketMetadata::EMPTY; 4];
+        let rx = unsafe {
+            UdpSocketBuffer::new(&mut TFTP_UDP_RX_META[..], &mut TFTP_UDP_RX_DATA[..])
+        };
+        let tx = unsafe {
+            UdpSocketBuffer::new(&mut TFTP_UDP_TX_META[..], &mut TFTP_UDP_TX_DATA[..])
+        };
+        UdpSocket::new(rx, tx)
+    };
+
     let dhcp_socket = Dhcpv4Socket::new();
 
     let tcp_server_handle = iface.add_socket(tcp_server_socket);
     let udp_server_handle = iface.add_socket(udp_server_socket);
     let bitmap_udp_handle = iface.add_socket(bitmap_udp_socket);
+    let tftp_udp_handle = iface.add_socket(tftp_udp_socket);
     let dhcp_handle = iface.add_socket(dhcp_socket);
 
     // Always turn on HUB75 for debugging (shows firmware is running)
@@ -145,11 +162,13 @@ fn main() -> ! {
         quit: false,
         debug: false,
         bitmap_stats: bitmap_udp::BitmapStats::new(),
+        layout: LayoutConfig::single_panel(96, 48),
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
 
     let mut bitmap_rx = BitmapReceiver::new();
+    let mut tftp_loader = TftpConfigLoader::new();
 
     let mut time_ms: i64 = 0;
     let mut telnet_active = false;
@@ -180,6 +199,11 @@ fn main() -> ! {
                         });
                         if let Some(router) = config.router {
                             iface.routes_mut().add_default_ipv4_route(router).ok();
+                            // Start TFTP config load from gateway
+                            if !tftp_loader.is_active() && !tftp_loader.is_done() {
+                                writeln!(r.context.output, "TFTP: fetching layout.cfg from {}", router).ok();
+                                tftp_loader.start(router);
+                            }
                         }
                     }
                     Dhcpv4Event::Deconfigured => {
@@ -201,6 +225,23 @@ fn main() -> ! {
                 iface.update_ip_addrs(|addrs| {
                     addrs[0] = IpCidr::Ipv4(fallback);
                 });
+            }
+        }
+
+        // Poll TFTP config loader
+        if tftp_loader.is_active() {
+            let socket = iface.get_socket::<UdpSocket>(tftp_udp_handle);
+            if tftp_loader.poll(socket, time_ms) {
+                // Config loaded — parse and apply layout
+                if let Some(layout) = tftp_loader.parse_config() {
+                    writeln!(r.context.output, "TFTP: layout {}x{} ({}x{} virtual)",
+                        layout.grid_cols, layout.grid_rows,
+                        layout.virtual_width(), layout.virtual_height()).ok();
+                    layout.apply(&mut r.context.hub75);
+                    r.context.layout = layout;
+                } else {
+                    writeln!(r.context.output, "TFTP: failed to parse layout.cfg").ok();
+                }
             }
         }
 

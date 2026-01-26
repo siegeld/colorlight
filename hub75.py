@@ -43,9 +43,9 @@ class Hub75(Module, AutoCSR):
                 csr = CSRStorage(name=name,
                                  fields=[
                                      CSRField(
-                                         "x", description="x position in multiples of 32", size=8, offset=0),
+                                         "x", description="x position in multiples of 16", size=8, offset=0),
                                      CSRField(
-                                         "y", description="y position in multiples of 32", size=8, offset=8),
+                                         "y", description="y position in multiples of 16", size=8, offset=8),
                                      CSRField(
                                          "rot", description="rotation in clockwise 90°", size=2, offset=16),
                                  ])
@@ -456,9 +456,9 @@ class RamAddressGenerator(Module):
                 self.adr.eq(
                     base_addr
                     + (y_offset +
-                        ((cur_panel_config >> 8) & 0xFF) * 32)
+                        ((cur_panel_config >> 8) & 0xFF) * 16)
                     * image_width + x_offset
-                    + (cur_panel_config & 0xFF) * 32),
+                    + (cur_panel_config & 0xFF) * 16),
                 If(self.valid & (~config_lookup_valid),
                     self.started.eq(False)))
         ]
