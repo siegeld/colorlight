@@ -1,7 +1,7 @@
 use litex_pac as pac;
 
-const CHAIN_LENGTH: u8 = 1;  // Matches chain_length_2=0 in gateware (single 128x64 panel)
-const OUTPUTS: u8 = 4;
+const CHAIN_LENGTH: u8 = 1;  // Matches chain_length_2=0 in gateware (single panel per output)
+const OUTPUTS: u8 = 6;
 
 // Framebuffer layout in SDRAM (addresses in 32-bit words)
 const FB_SDRAM_OFFSET_BYTES: u32 = 0x00400000 / 2;

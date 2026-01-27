@@ -135,7 +135,7 @@ class BaseSoC(SoCCore):
         no_ident_version=False,
         ip_address="10.11.6.250",
         panel="96x48",
-        n_outputs=4,
+        n_outputs=6,
         **kwargs
     ):
         platform = colorlight_5a_75e.Platform(revision=revision)
@@ -334,9 +334,9 @@ def main():
     )
     parser.add_argument(
         "--outputs",
-        default=4,
+        default=6,
         type=int,
-        help="Number of HUB75 outputs (default: 4)",
+        help="Number of HUB75 outputs (default: 6)",
     )
     args = parser.parse_args()
 

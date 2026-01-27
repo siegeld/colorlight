@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.4.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -9,7 +9,7 @@ A complete FPGA-based LED panel controller for **HUB75** displays, built on the 
 
 ## Features
 
-- **HUB75 LED Panel Driver** - Configurable output count (default 4, up to 8 via `--outputs`), 4 panels per chain
+- **HUB75 LED Panel Driver** - Configurable output count (default 6, up to 16 via `--outputs`), supports J1–J6
 - **DHCP Networking** - Automatic IP via DHCP with unique MAC from SPI flash
 - **TFTP Boot Config** - Per-board YAML layout config fetched at boot via `<mac>.yml`
 - **HTTP REST API** - Web status page and JSON API on port 80
@@ -208,6 +208,22 @@ Connect via `telnet <ip> 23` to access the management console:
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
 
 ## Configuration
+
+### HUB75 Output Count
+
+The number of HUB75 outputs must be set consistently in **two places**:
+
+| File | Setting | Description |
+|------|---------|-------------|
+| `build.sh` | `OUTPUTS=6` | Passed to gateware build (`--outputs`) |
+| `sw_rust/barsign_disp/src/hub75.rs` | `const OUTPUTS: u8 = 6` | Firmware panel register count |
+
+Both must match. A mismatch (e.g., firmware accessing panel CSRs that don't exist in the bitstream) will crash the SoC. The `layout.rs` constant `MAX_OUTPUTS` should also match.
+
+After changing the output count, rebuild everything:
+```bash
+./build.sh bitstream pac firmware
+```
 
 ### IP Address (DHCP)
 

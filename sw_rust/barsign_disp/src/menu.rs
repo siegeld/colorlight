@@ -270,7 +270,7 @@ pub const ROOT_MENU: Menu<Context> = Menu {
                 parameters: &[
                     Parameter::Mandatory {
                         parameter_name: "output",
-                        help: Some("J1-J4 or show"),
+                        help: Some("J1-J6 or show"),
                     },
                     Parameter::Optional {
                         parameter_name: "pos",
@@ -647,12 +647,12 @@ fn panel_cmd(
         match rest.parse::<u8>() {
             Ok(n) if n >= 1 && n <= crate::layout::MAX_OUTPUTS as u8 => n,
             _ => {
-                writeln!(context.output, "Invalid output: {} (use J1-J4)", output_arg).unwrap();
+                writeln!(context.output, "Invalid output: {} (use J1-J6)", output_arg).unwrap();
                 return;
             }
         }
     } else {
-        writeln!(context.output, "Invalid output: {} (use J1-J4 or show)", output_arg).unwrap();
+        writeln!(context.output, "Invalid output: {} (use J1-J6 or show)", output_arg).unwrap();
         return;
     };
 

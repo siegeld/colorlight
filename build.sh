@@ -19,7 +19,7 @@ REVISION="8.2"
 IP_ADDRESS="10.11.6.250"
 CABLE="usb-blaster"
 PANEL="128x64"
-OUTPUTS=4
+OUTPUTS=6
 PATTERN="grid"
 BUILD_DIR="build/colorlight_5a_75e"
 BITSTREAM="${BUILD_DIR}/gateware/colorlight_5a_75e.bit"
@@ -217,9 +217,24 @@ program_sram() {
     print_step "Loading ${rel_bit} to SRAM via ${CABLE} (panel: ${PANEL})"
     print_warning "This is temporary - configuration will be lost on power cycle"
 
-    docker_run_usb "openFPGALoader --cable ${CABLE} /project/${rel_bit}"
+    # Probe JTAG chain first to wake up the TAP state machine
+    print_step "Probing JTAG chain..."
+    docker_run_usb "openFPGALoader --cable ${CABLE} --detect" 2>&1
 
-    print_success "Bitstream loaded to SRAM"
+    local max_attempts=5
+    for attempt in $(seq 1 ${max_attempts}); do
+        if docker_run_usb "openFPGALoader --cable ${CABLE} /project/${rel_bit}" 2>&1; then
+            print_success "Bitstream loaded to SRAM (attempt ${attempt}/${max_attempts})"
+            return 0
+        fi
+        if [[ ${attempt} -lt ${max_attempts} ]]; then
+            print_warning "Attempt ${attempt}/${max_attempts} failed, retrying..."
+            sleep 2
+        fi
+    done
+
+    print_error "Failed to program FPGA after ${max_attempts} attempts"
+    exit 1
 }
 
 program_flash() {
@@ -423,7 +438,7 @@ OPTIONS:
     -i, --ip IP             IP address for firmware (default: 10.11.6.250)
     -c, --cable CABLE       JTAG cable type (default: usb-blaster)
     -p, --panel PANEL       Panel type: 128x64, 96x48, 64x32, 64x64 (default: 128x64)
-    -o, --outputs N         Number of HUB75 outputs (default: 4)
+    -o, --outputs N         Number of HUB75 outputs (default: 6)
     -t, --pattern PATTERN   Test pattern: grid, rainbow, solid_white, solid_red,
                             solid_green, solid_blue (default: grid)
     --host-ip IP            Host IP for TFTP server (auto-detected if not set)

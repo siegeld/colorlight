@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - 2026-01-27
+
+### Changed
+- **HUB75 outputs 4→6** — Expanded from 4 to 6 HUB75 outputs (J1–J6), using 53/56 EBRs on the ECP5-25F. Enables up to 6 independent panels.
+- **JTAG retry logic** — SRAM programming now retries up to 5 attempts with a JTAG chain probe before loading, working around unreliable USB Blaster clones.
+
+### Added
+- **README: HUB75 Output Count section** — Documents that output count must be set in both `build.sh` and `hub75.rs` to avoid gateware/firmware mismatch.
+
+---
+
 ## [1.4.1] - 2026-01-27
 
 ### Fixed

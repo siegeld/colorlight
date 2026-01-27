@@ -1,6 +1,6 @@
 [package]
 name = "barsign-disp"
-version = "1.4.1"
+version = "1.5.0"
 authors = [ "David Sawatzke <d-git@sawatzke.dev>" ]
 edition = "2021"
 

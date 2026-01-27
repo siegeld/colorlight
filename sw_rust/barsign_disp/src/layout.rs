@@ -1,7 +1,7 @@
 /// Panel layout configuration for multi-panel virtual displays.
-/// Maps physical J-connectors (outputs 0–3) to grid positions.
+/// Maps physical J-connectors (outputs 0–5) to grid positions.
 
-pub const MAX_OUTPUTS: usize = 4;
+pub const MAX_OUTPUTS: usize = 6;
 const POS_UNIT: u16 = 16; // gateware multiplier
 
 pub struct LayoutConfig {
@@ -56,7 +56,7 @@ impl LayoutConfig {
     /// - `grid=2x1` — set grid dimensions
     /// - `panel_width=96` — physical panel width
     /// - `panel_height=48` — physical panel height
-    /// - `J1=0,0` through `J4=7,7` — assign output to grid position
+    /// - `J1=0,0` through `J6=7,7` — assign output to grid position
     pub fn parse(text: &str) -> Option<Self> {
         let mut config = Self::single_panel(96, 48);
         // Clear default assignment — config should be explicit
