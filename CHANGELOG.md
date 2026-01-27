@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.1] - 2026-01-27
+
+### Fixed
+- **HTTP server stops responding** — Both TCP sockets on port 80 could get permanently stuck if a client connected without sending a complete request (browser prefetch, half-open connections, remote close). Added idle timeout (5s) and `may_recv()` check to abort stuck sockets so they re-listen.
+
+---
+
 ## [1.4.0] - 2026-01-26
 
 ### Changed
@@ -298,6 +305,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.4.1 | 2026-01-27 | Fix HTTP server stuck sockets with idle timeout |
 | 1.4.0 | 2026-01-26 | Parameterize HUB75 outputs (8→4), nrxslots 4→8 |
 | 1.3.1 | 2026-01-26 | Pin LiteX to 2025.12, reproducible Docker builds |
 | 1.3.0 | 2026-01-26 | BIOS broadcast TFTP on custom port 6969 |

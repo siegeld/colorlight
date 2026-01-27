@@ -199,6 +199,7 @@ fn main() -> ! {
     let mut http_responses = [http::HttpResponse::new(), http::HttpResponse::new()];
     let mut http_response_sent = [0usize; 2];
     let mut http_close_at = [0i64; 2];
+    let mut http_connected_at = [0i64; 2];
 
     // Configure timer0 for periodic 1ms ticks (non-blocking)
     unsafe {
@@ -513,7 +514,23 @@ fn main() -> ! {
                     http_requests[i].reset();
                     http_responses[i].data.clear();
                     http_response_sent[i] = 0;
+                    http_connected_at[i] = 0;
                     socket.listen(80).ok();
+                }
+                // Abort stuck HTTP connections: remote closed or idle too long
+                if socket.is_active() {
+                    if http_connected_at[i] == 0 {
+                        http_connected_at[i] = time_ms;
+                    }
+                    if !http_requests[i].is_complete() {
+                        if !socket.may_recv() || time_ms - http_connected_at[i] > 5000 {
+                            socket.abort();
+                            http_connected_at[i] = 0;
+                            continue;
+                        }
+                    }
+                } else {
+                    http_connected_at[i] = 0;
                 }
                 if socket.can_recv() && !http_requests[i].is_complete() {
                     let mut buf = [0u8; 128];
