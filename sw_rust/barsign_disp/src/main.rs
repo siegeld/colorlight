@@ -283,7 +283,10 @@ fn main() -> ! {
 
         // Streaming flag: true while bitmap packets are arriving.
         // Computed here (after initial drain) so the burst loop can use it.
-        let streaming = time_ms - last_bitmap_packet_ms < 200;
+        // Boot grace period: don't enter streaming mode for first 10 seconds,
+        // allowing DHCP/TFTP config to complete even if video is already streaming.
+        const BOOT_GRACE_PERIOD_MS: i64 = 10_000;
+        let streaming = time_ms > BOOT_GRACE_PERIOD_MS && time_ms - last_bitmap_packet_ms < 200;
 
         for _burst in 0..50 {
             if iface.device().peek_rx().is_none() { break; }
