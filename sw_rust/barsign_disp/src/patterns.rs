@@ -5,6 +5,61 @@ fn rgb(r: u8, g: u8, b: u8) -> u32 {
     (b as u32) << 16 | (g as u32) << 8 | (r as u32)
 }
 
+/// Simple 5x7 pixel font for version display
+const FONT_5X7: &[(&[u8; 7], char)] = &[
+    (&[0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110], '0'),
+    (&[0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110], '1'),
+    (&[0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111], '2'),
+    (&[0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110], '3'),
+    (&[0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010], '4'),
+    (&[0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110], '5'),
+    (&[0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110], '6'),
+    (&[0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000], '7'),
+    (&[0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110], '8'),
+    (&[0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100], '9'),
+    (&[0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100], '.'),
+    (&[0b00000, 0b00000, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100], 'v'),
+];
+
+/// Check if pixel (col, row) should be lit for version text in second-row left square (avoids diagonals)
+fn is_version_pixel(col: usize, row: usize, width: usize, height: usize) -> bool {
+    const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+    let text_width = VERSION.len() * 6;
+    // Position in second row, leftmost square (between h/4 and h/2, left of w/4)
+    // This area avoids both diagonal lines
+    let square_left = 1;
+    let square_right = width / 4 - 1;
+    let square_top = height / 4 + 1;
+    let square_bottom = height / 2 - 1;
+    let start_x = square_left + (square_right - square_left - text_width) / 2;
+    let start_y = square_top + (square_bottom - square_top - 7) / 2;
+
+    if row < start_y || row >= start_y + 7 {
+        return false;
+    }
+    if col < start_x || col >= start_x + text_width {
+        return false;
+    }
+
+    let char_idx = (col - start_x) / 6;
+    let pixel_x = (col - start_x) % 6;
+    let pixel_y = row - start_y;
+
+    if pixel_x >= 5 {
+        return false; // spacing between chars
+    }
+
+    if let Some(ch) = VERSION.chars().nth(char_idx) {
+        for (glyph, c) in FONT_5X7 {
+            if *c == ch {
+                let row_bits = glyph[pixel_y];
+                return (row_bits >> (4 - pixel_x)) & 1 == 1;
+            }
+        }
+    }
+    false
+}
+
 /// Convert HSV to RGB. h in [0,360), s,v in [0,255]
 fn hsv_to_rgb(h: u16, s: u8, v: u8) -> (u8, u8, u8) {
     if s == 0 {
@@ -61,8 +116,10 @@ pub fn grid(width: u16, height: u16) -> impl Iterator<Item = u32> {
             let diag1 = col == row * w / h;
             let diag2 = col == w - 1 - row * w / h;
 
-            // Priority: diagonals > verticals > horizontals > black
-            if diag1 {
+            // Priority: version text > diagonals > verticals > horizontals > black
+            if is_version_pixel(col, row, w, h) {
+                rgb(255, 255, 255) // WHITE for version text
+            } else if diag1 {
                 rgb(0, 255, 255) // CYAN
             } else if diag2 {
                 rgb(255, 0, 255) // MAGENTA

@@ -104,7 +104,7 @@ checksum = "f8fe8f5a8a398345e52358e18ff07cc17a568fbca5c6f73873d3a62056309603"
 
 [[package]]
 name = "barsign-disp"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "embedded-hal 0.2.5",
  "heapless",

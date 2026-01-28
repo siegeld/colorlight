@@ -59,7 +59,40 @@ def hsv_to_rgb(h, s, v):
     return int((r + m) * 255), int((g + m) * 255), int((b + m) * 255)
 
 
-def pattern_grid(data, columns, rows):
+# Simple 5x7 pixel font for digits and basic chars
+FONT_5X7 = {
+    '0': ["01110","10001","10011","10101","11001","10001","01110"],
+    '1': ["00100","01100","00100","00100","00100","00100","01110"],
+    '2': ["01110","10001","00001","00010","00100","01000","11111"],
+    '3': ["11111","00010","00100","00010","00001","10001","01110"],
+    '4': ["00010","00110","01010","10010","11111","00010","00010"],
+    '5': ["11111","10000","11110","00001","00001","10001","01110"],
+    '6': ["00110","01000","10000","11110","10001","10001","01110"],
+    '7': ["11111","00001","00010","00100","01000","01000","01000"],
+    '8': ["01110","10001","10001","01110","10001","10001","01110"],
+    '9': ["01110","10001","10001","01111","00001","00010","01100"],
+    '.': ["00000","00000","00000","00000","00000","01100","01100"],
+    'v': ["00000","00000","10001","10001","10001","01010","00100"],
+    'V': ["10001","10001","10001","10001","01010","01010","00100"],
+    ' ': ["00000","00000","00000","00000","00000","00000","00000"],
+}
+
+def draw_text(data, columns, rows, text, start_x, start_y, color):
+    """Draw text using 5x7 pixel font."""
+    x = start_x
+    for char in text:
+        if char in FONT_5X7:
+            glyph = FONT_5X7[char]
+            for dy, row_bits in enumerate(glyph):
+                for dx, bit in enumerate(row_bits):
+                    if bit == '1':
+                        px, py = x + dx, start_y + dy
+                        if 0 <= px < columns and 0 <= py < rows:
+                            set_pixel(data, columns, py, px, *color)
+            x += 6  # 5 pixels + 1 spacing
+
+
+def pattern_grid(data, columns, rows, version=None):
     """Grid pattern with horizontal, vertical, and diagonal lines."""
     # Colors
     WHITE = (255, 255, 255)
@@ -97,6 +130,18 @@ def pattern_grid(data, columns, rows):
         if 0 <= col < columns:
             set_pixel(data, columns, row, col, *MAGENTA)
 
+    # Draw version text in second-row left square (avoids diagonals)
+    if version:
+        text_width = len(version) * 6
+        square_left = 1
+        square_right = columns // 4 - 1
+        square_top = rows // 4 + 1
+        square_bottom = rows // 2 - 1
+        start_x = square_left + (square_right - square_left - text_width) // 2
+        start_y = square_top + (square_bottom - square_top - 7) // 2
+        draw_text(data, columns, rows, version, start_x, start_y, WHITE)
+        print(f"  Version: {version}")
+
     print(f"  Pattern: grid")
     print(f"  Horizontal lines at rows: {horizontal_rows}")
     print(f"  Vertical lines at cols: {[c for c, _ in vertical_lines]}")
@@ -124,12 +169,26 @@ def pattern_solid(data, columns, rows, r, g, b, name):
     print(f"  Pattern: solid {name}")
 
 
-def create_test_image(columns, rows, pattern, output_path):
+def get_cargo_version():
+    """Read version from Cargo.toml."""
+    import os
+    cargo_path = os.path.join(os.path.dirname(__file__), '..', 'sw_rust', 'barsign_disp', 'Cargo.toml')
+    try:
+        with open(cargo_path) as f:
+            for line in f:
+                if line.startswith('version = '):
+                    return line.split('"')[1]
+    except:
+        pass
+    return None
+
+
+def create_test_image(columns, rows, pattern, output_path, version=None):
     """Create a test pattern for the specified panel size."""
     data = create_header(columns, rows)
 
     if pattern == "grid":
-        pattern_grid(data, columns, rows)
+        pattern_grid(data, columns, rows, version=version)
     elif pattern == "rainbow":
         pattern_rainbow(data, columns, rows)
     elif pattern == "solid_white":
@@ -195,7 +254,12 @@ Examples:
     if args.rows:
         rows = args.rows
 
-    create_test_image(columns, rows, args.pattern, args.output)
+    # Get version from Cargo.toml for grid pattern
+    version = get_cargo_version()
+    if version:
+        version = f"v{version}"
+
+    create_test_image(columns, rows, args.pattern, args.output, version=version)
 
 
 if __name__ == "__main__":

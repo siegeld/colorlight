@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-01-28
+
+### Added
+- **Version display in test pattern** — Grid test pattern now shows firmware version (e.g. "v1.8.1") in the second-row left square, avoiding diagonal lines for readability. Version is derived from Cargo.toml at compile time. Both Rust runtime pattern (`patterns::grid()`) and Python-generated default image (`gen_test_image.py`) include the version.
+
+---
+
 ## [1.8.0] - 2026-01-27
 
 ### Changed
