@@ -80,8 +80,13 @@ def main():
                         help="Grid layout (e.g. 1x2) — overrides --width/--height")
     parser.add_argument("--panel-size", default="128x64",
                         help="Physical panel size (default: 128x64)")
-    parser.add_argument("--chunk-delay", type=float, default=0.002,
-                        help="Delay between UDP chunks in seconds (default: 0.002)")
+    parser.add_argument("--chunk-delay", type=float, default=None,
+                        help="Delay between UDP chunks in seconds. "
+                             "Auto-calculated from fps when omitted (burst-size=0 only).")
+    parser.add_argument("--burst-size", type=int, default=0,
+                        help="Packets per burst (default: 0=uniform chunk-delay mode)")
+    parser.add_argument("--burst-delay", type=float, default=0.003,
+                        help="Pause between bursts in seconds (default: 0.003)")
     args = parser.parse_args()
 
     if not os.path.isfile(args.video):
@@ -95,7 +100,12 @@ def main():
     fps = args.fps
     frame_period = 1.0 / fps
     frame_size = args.width * args.height * 3
+    burst_size = args.burst_size
+    burst_delay = args.burst_delay
+    total_chunks_est = (frame_size + BYTES_PER_CHUNK - 1) // BYTES_PER_CHUNK
     chunk_delay = args.chunk_delay
+    if chunk_delay is None:
+        chunk_delay = (0.9 / fps) / total_chunks_est
 
     print(f"Streaming {args.video} at {fps:.1f} fps -> {args.host}:{args.port} ({args.width}x{args.height})",
           file=sys.stderr)
@@ -130,7 +140,10 @@ def main():
                     )
                     sock.sendto(header + chunk, dest)
                     if i < total_chunks - 1:
-                        time.sleep(chunk_delay)
+                        if burst_size > 0 and (i + 1) % burst_size == 0:
+                            time.sleep(burst_delay)
+                        elif burst_size == 0:
+                            time.sleep(chunk_delay)
                 frame_id = (frame_id + 1) & 0xFFFF
                 frame_count += 1
 

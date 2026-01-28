@@ -45,6 +45,28 @@ impl Eth {
             self.ethmac.rx_datapath_crc_errors().read().bits(),
         )
     }
+
+    /// Peek at the current MAC RX slot without consuming it.
+    /// Returns the raw Ethernet frame if a packet is pending.
+    /// Caller must finish using the data before calling `ack_rx()`.
+    pub fn peek_rx(&self) -> Option<&[u8]> {
+        if self.ethmac.sram_writer_ev_pending().read().bits() == 0 {
+            return None;
+        }
+        unsafe {
+            let slot = self.ethmac.sram_writer_slot().read().bits() as usize;
+            let length = self.ethmac.sram_writer_length().read().bits() as usize;
+            let buf = self.buf_base() as *const u8;
+            Some(core::slice::from_raw_parts(buf.add(slot * SLOT_SIZE), length))
+        }
+    }
+
+    /// Acknowledge the current RX slot, allowing the MAC to reuse it.
+    pub fn ack_rx(&self) {
+        self.ethmac
+            .sram_writer_ev_pending()
+            .write(unsafe { |w| w.bits(1) });
+    }
 }
 
 impl<'a> phy::Device<'a> for Eth {

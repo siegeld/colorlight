@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.7.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.8.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -143,21 +143,23 @@ python tools/send_image.py --host 10.11.6.70 --layout 2x1 photo.png
 
 ### send_video.py — Video File
 
-Stream a local video file to the panel. Requires ffmpeg.
+Stream a local video file to the panel. Requires ffmpeg. Chunk pacing is auto-calculated from fps and frame size (90% of frame budget), so explicit `--chunk-delay` is rarely needed.
 
 ```bash
 python tools/send_video.py --host 10.11.6.70 clip.mp4
 python tools/send_video.py --host 10.11.6.70 --fps 15 --loop clip.mp4
-python tools/send_video.py --host 10.11.6.70 --layout 1x2 --chunk-delay 0.003 clip.mp4
+python tools/send_video.py --host 10.11.6.70 --layout 4x2 clip.mp4
+python tools/send_video.py --host 10.11.6.70 --chunk-delay 0.003 clip.mp4  # manual override
 ```
 
 ### send_youtube.py — YouTube / Web Video
 
-Stream a YouTube video (or any [yt-dlp supported URL](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)) directly to the panel — no file is downloaded. Requires yt-dlp and ffmpeg.
+Stream a YouTube video (or any [yt-dlp supported URL](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)) directly to the panel — no file is downloaded. Requires yt-dlp and ffmpeg. Chunk pacing is auto-calculated (same as `send_video.py`).
 
 ```bash
 python tools/send_youtube.py --host 10.11.6.70 "https://youtube.com/watch?v=ID"
 python tools/send_youtube.py --host 10.11.6.70 --loop "https://youtube.com/watch?v=ID"
+python tools/send_youtube.py --host 10.11.6.70 --layout 4x2 "https://youtube.com/watch?v=ID"
 
 # Age-gated / auth videos (export cookies.txt from your browser)
 python tools/send_youtube.py --host 10.11.6.70 --cookies cookies.txt "URL"
@@ -206,6 +208,17 @@ Connect via `telnet <ip> 23` to access the management console:
 | Main RAM | 0x40000000 | 4MB | SDRAM |
 | SPI Flash | 0x80200000 | 2MB | Bitstream + firmware |
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
+
+## Multi-Panel Approaches
+
+There are two ways to drive multiple panels per HUB75 output:
+
+| Approach | Gateware | Panels per output | Virtual width | Notes |
+|----------|----------|-------------------|---------------|-------|
+| **Bigger panel** | `--panel 256x64` with `chain_length_2=0` | 1 (wider) | 256 | Gateware reads 256 contiguous pixels in one shift register. Simpler, but treats the chain as a single wide panel — no independent positioning. |
+| **Chaining** | `--panel 128x64` with `chain_length_2=1` | 2 (independent) | 128 × grid_cols | Gateware reads two 128-pixel blocks at independent (x,y) offsets via panel CSRs. Enables flexible layouts (e.g., 6×2 grid with non-adjacent regions). |
+
+**Chaining is the recommended approach** for multi-panel setups. It uses the same BRAM budget, supports flexible grid layouts via TFTP config, and scales to 12 panels (6 outputs × 2 chains).
 
 ## Configuration
 
@@ -324,6 +337,7 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 
 ## Known Issues
 
+- **HTTP/telnet unresponsive during streaming** — While actively receiving bitmap UDP frames, the firmware skips all slow-path processing (HTTP, telnet, DHCP, Art-Net) and discards non-bitmap packets to prevent MAC FIFO overflows on the 40MHz CPU. The board cannot be reached via web browser or telnet during streaming. Services resume within 200ms of the last frame.
 - **Art-Net**: Palette updates work, direct pixel writes commented out
 - **BIOS TFTP**: Uses hardcoded server `10.11.6.65` on non-standard port 6969
 

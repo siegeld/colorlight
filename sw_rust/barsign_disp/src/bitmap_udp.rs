@@ -51,7 +51,7 @@ impl BitmapStats {
 
 pub struct BitmapReceiver {
     current_frame_id: u16,
-    chunks_count: u16,     // number of chunks received for current frame
+    pub chunks_count: u16, // number of chunks received for current frame
     total_chunks: u8,
     width: u16,
     height: u16,

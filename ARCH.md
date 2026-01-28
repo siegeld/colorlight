@@ -63,7 +63,7 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | ROM | 0x00000000 | 64KB | LiteX BIOS |
 | SRAM | 0x10000000 | 8KB | Stack/heap |
 | Main RAM | 0x40000000 | 4MB | SDRAM, firmware runs here |
-| EthMAC | 0x80000000 | 8KB | RX/TX buffers |
+| EthMAC | 0x80000000 | 20KB | 8 RX + 2 TX slots × 2KB each |
 | SPI Flash | 0x80200000 | 2MB | Memory-mapped flash |
 | Flash Boot | 0x80300000 | - | Firmware load address |
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
@@ -80,6 +80,37 @@ The CPU always writes to the **back buffer** via `write_img_data()`, then calls 
 ### Animation Framework
 
 Animation state is stored in `Context.animation` (enum: `None`, `Rainbow { phase }`). The main loop calls `animation_tick()` every 33ms (~30fps). Each tick writes a new frame to the back buffer and swaps.
+
+## Main Loop Architecture
+
+The firmware main loop (`main.rs`) has two processing paths to balance packet throughput against feature responsiveness:
+
+### Fast Path (every iteration)
+
+1. **Raw bitmap drain** — `drain_raw_bitmap!()` reads MAC RX slots directly via `peek_rx()`, bypassing smoltcp entirely. Only bitmap UDP packets (port 7000) are consumed; non-bitmap packets are left in the queue.
+2. **Burst loop** — If a non-bitmap packet blocks the RX queue, behavior depends on the streaming state:
+   - **Streaming:** The packet is **discarded** via `ack_rx()` and the next raw drain runs immediately. No `iface.poll()` is called — this avoids multi-ms stalls from smoltcp processing TCP/DHCP state machines, which were causing MAC FIFO overflows at high packet rates.
+   - **Idle:** `iface.poll()` is called to process the packet normally (ARP, TCP, DHCP), followed by a raw drain pass and a socket-level bitmap drain as fallback. Up to 50 iterations.
+
+### Slow Path (5ms tick, idle only)
+
+Handles DHCP, telnet, HTTP, Art-Net, TFTP config, animation, and MAC error counters. Runs every 5ms when the timer fires.
+
+### Streaming Detection
+
+The firmware tracks `last_bitmap_packet_ms` — updated every time any bitmap UDP packet is received (in both raw drain and socket fallback paths). Streaming is active when `time_ms - last_bitmap_packet_ms < 200`. This timeout-based approach ensures the flag clears reliably even if the last frame was incomplete (a partial frame with nonzero `chunks_count` won't keep the flag stuck).
+
+### Streaming Mode Behavior
+
+While streaming is active:
+- **Slow path is skipped entirely** — no DHCP, telnet, HTTP, Art-Net, or animation processing.
+- **Non-bitmap packets are discarded** — the fast-path burst loop calls `ack_rx()` instead of `iface.poll()`, preventing smoltcp stalls.
+- **HTTP and telnet do not respond** — the board is unreachable via web browser or telnet during active streaming. The sender's ARP entry is already cached so UDP delivery is unaffected.
+- **Services resume within 200ms** of the last bitmap packet arriving.
+
+### MAC RX FIFO
+
+The LiteEth MAC has 8 RX slots (`nrxslots=8`), each 2048 bytes. The slot count must be a power of 2 (LiteEth wishbone SRAM decoder constraint). The firmware constant `NRXSLOTS` in `ethernet.rs` must match the gateware value in `colorlight.py`.
 
 ## Telnet IAC Handling
 

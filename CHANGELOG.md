@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] - 2026-01-27
+
+### Changed
+- **Skip slow path and discard non-bitmap packets during streaming** — While bitmap UDP frames are arriving, the firmware skips all slow-path processing (DHCP, telnet, HTTP, Art-Net) and discards non-bitmap packets in the fast-path burst loop via `ack_rx()` instead of calling `iface.poll()`. This eliminates multi-ms smoltcp stalls that were overflowing the 8-slot MAC FIFO. HTTP/telnet are unreachable during streaming. Services resume within 200ms of the last packet. Streaming detection uses `last_bitmap_packet_ms` (any packet, not just completed frames) to avoid getting stuck on partial final frames.
+- **Auto chunk-delay in sender tools** — `send_video.py` and `send_youtube.py` now auto-calculate inter-chunk delay from fps and frame size when `--chunk-delay` is omitted: `(0.9 / fps) / total_chunks` (10% headroom). Explicit `--chunk-delay` still overrides. Enables higher panel counts (e.g. 8 panels at 10fps = 135 chunks) without manual tuning.
 
 ### Planned
 - Re-enable Art-Net direct pixel writes
@@ -353,6 +357,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.8.0 | 2026-01-27 | Skip slow path during streaming, auto chunk-delay, zero MAC overflows |
 | 1.7.0 | 2026-01-27 | Fix color channels, bitmap dimension validation, streaming improvements |
 | 1.6.0 | 2026-01-27 | Panel chaining: 2 panels per output, up to 12 total |
 | 1.5.0 | 2026-01-27 | Expand HUB75 outputs 4→6, JTAG retry logic |

@@ -23,6 +23,16 @@ use smoltcp::socket::{
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
+/// Check if a raw Ethernet frame is a UDP packet destined for the bitmap port (7000).
+/// Layout: Ethernet(14) + IPv4(20, IHL=5) + UDP(8) = 42-byte header.
+fn is_bitmap_udp(frame: &[u8]) -> bool {
+    frame.len() >= 52 // 42 header + 10 bitmap header min
+        && frame[12] == 0x08 && frame[13] == 0x00 // EtherType: IPv4
+        && frame[14] & 0x0F == 5                   // IHL: 5 (no options)
+        && frame[23] == 17                          // Protocol: UDP
+        && frame[36] == 0x1B && frame[37] == 0x58   // UDP dst port: 7000
+}
+
 #[entry]
 fn main() -> ! {
     let peripherals = unsafe { pac::Peripherals::steal() };
@@ -142,6 +152,12 @@ fn main() -> ! {
     let http_handle_a = iface.add_socket(http_tcp_socket_a);
     let http_handle_b = iface.add_socket(http_tcp_socket_b);
 
+    // Bind bitmap UDP socket so poll() routes leaked packets to its buffer
+    {
+        let socket = iface.get_socket::<UdpSocket>(bitmap_udp_handle);
+        socket.bind(7000).ok();
+    }
+
     // Always turn on HUB75 for debugging (shows firmware is running)
     hub75.on();
 
@@ -187,6 +203,7 @@ fn main() -> ! {
     let mut tftp_loader = TftpConfigLoader::new();
 
     let mut time_ms: i64 = 0;
+    let mut last_bitmap_packet_ms: i64 = 0;
     let mut telnet_active = false;
     let mut loop_counter: u32 = 0;
     // Telnet IAC parser state: 0=normal, 1=got IAC(0xFF), 2=got cmd(WILL/WONT/DO/DONT),
@@ -229,54 +246,84 @@ fn main() -> ! {
 
         loop_counter = loop_counter.wrapping_add(1);
 
-        iface.poll(time).ok();
-
-        // Fast path: tight poll loop to drain bitmap UDP packets with minimal latency.
-        // After the normal poll, keep polling + draining until no more packets arrive.
-        // This lets us process bursts of chunks without waiting for the next 1ms tick.
-        for _burst in 0..50 {
-            {
-                let socket = iface.get_socket::<UdpSocket>(bitmap_udp_handle);
-                if !socket.is_open() {
-                    socket.bind(7000).ok();
-                }
-                let mut got_any = false;
-                while socket.can_recv() {
-                    match socket.recv() {
-                        Ok((data, _endpoint)) => {
-                            got_any = true;
-                            let complete = bitmap_rx.process_packet(data, &mut r.context.hub75, time_ms);
-                            if r.context.debug {
-                                let s = &bitmap_rx.stats;
-                                writeln!(r.context.output, "BM: pkt={} chunk={}/{} {}x{} len={} mask={:04x}{}",
-                                    s.packets_total, s.last_chunk_index + 1, s.last_total_chunks,
-                                    s.last_width, s.last_height, s.last_data_len,
-                                    s.chunks_received,
-                                    if complete { " COMPLETE" } else { "" },
-                                ).ok();
-                            }
+        // Raw fast path: drain bitmap UDP packets directly from MAC hardware,
+        // bypassing smoltcp to eliminate double-copy overhead.
+        macro_rules! drain_raw_bitmap {
+            () => {{
+                let device = iface.device();
+                let mut _found = false;
+                loop {
+                    match device.peek_rx() {
+                        Some(frame) if is_bitmap_udp(frame) => {
+                            _found = true;
+                            last_bitmap_packet_ms = time_ms;
+                            let complete = bitmap_rx.process_packet(
+                                &frame[42..], &mut r.context.hub75, time_ms);
                             if complete {
                                 r.context.hub75.swap_buffers();
                                 r.context.hub75.set_mode(hub75::OutputMode::FullColor);
                                 r.context.hub75.on();
                                 r.context.animation = menu::Animation::None;
+
                             }
                             r.context.bitmap_stats = bitmap_rx.stats;
+                            device.ack_rx();
                         }
-                        Err(_) => break,
+                        _ => break,
                     }
                 }
-                if !got_any {
-                    break;
-                }
-            } // socket borrow dropped here
-            // Poll again to move hardware packets into socket buffer
-            iface.poll(time).ok();
+                _found
+            }};
         }
 
-        // Slow path: only run non-bitmap work every 5ms.
-        // This keeps the tight loop (poll MAC + drain bitmap) running most of the time,
-        // preventing MAC RX overflow during bitmap streaming.
+        // Fast path: drain bitmap packets from MAC. Only call poll() when
+        // a non-bitmap packet blocks the queue — poll() is expensive on a
+        // 40MHz RISC-V and causes FIFO overflows if called unconditionally.
+        drain_raw_bitmap!();
+
+        // Streaming flag: true while bitmap packets are arriving.
+        // Computed here (after initial drain) so the burst loop can use it.
+        let streaming = time_ms - last_bitmap_packet_ms < 200;
+
+        for _burst in 0..50 {
+            if iface.device().peek_rx().is_none() { break; }
+
+            if streaming {
+                // During streaming, discard non-bitmap packets instead of
+                // calling poll().  poll() processes TCP/DHCP state machines
+                // which stall the CPU for milliseconds and overflow the
+                // 8-slot MAC FIFO.  The sender already has our ARP entry.
+                iface.device().ack_rx();
+                drain_raw_bitmap!();
+            } else {
+                iface.poll(time).ok();
+
+                let mut got_any = drain_raw_bitmap!();
+
+                // Socket fallback: drain bitmap packets that poll() consumed
+                {
+                    let socket = iface.get_socket::<UdpSocket>(bitmap_udp_handle);
+                    while let Ok((data, _ep)) = socket.recv() {
+                        got_any = true;
+                        last_bitmap_packet_ms = time_ms;
+                        let complete = bitmap_rx.process_packet(
+                            data, &mut r.context.hub75, time_ms);
+                        if complete {
+                            r.context.hub75.swap_buffers();
+                            r.context.hub75.set_mode(hub75::OutputMode::FullColor);
+                            r.context.hub75.on();
+                            r.context.animation = menu::Animation::None;
+                        }
+                        r.context.bitmap_stats = bitmap_rx.stats;
+                    }
+                }
+
+                if !got_any { break; }
+            }
+        }
+        if streaming {
+            continue;
+        }
         if !timer_fired || (time_ms % 5 != 0) {
             continue;
         }
@@ -372,9 +419,8 @@ fn main() -> ! {
             }
         }
 
-        // Update animation at ~30fps (every 33ms)
-        // Double buffering prevents tearing from SDRAM rewrite
-        if time_ms % 33 == 0 {
+        // Update animation at ~30fps (every 33ms), but skip during streaming
+        if !streaming && time_ms % 33 == 0 {
             r.context.animation_tick();
         }
 
@@ -472,6 +518,7 @@ fn main() -> ! {
             }
         }
         // Drain MAC between slow-path blocks to prevent bitmap UDP overflow
+        drain_raw_bitmap!();
         iface.poll(time).ok();
 
         // udp:6454: artnet
@@ -500,6 +547,7 @@ fn main() -> ! {
             };
         }
         // (bitmap UDP is handled in the fast path at top of loop)
+        drain_raw_bitmap!();
         iface.poll(time).ok();
 
         // tcp:80: HTTP server (two sockets — one accepts while the other closes)

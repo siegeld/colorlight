@@ -76,7 +76,12 @@ def stream_frames(url, width, height, dest, sock, args):
     frame_size = width * height * 3
     frame_id = int(time.time()) & 0xFFFF
     frame_count = 0
+    burst_size = args.burst_size
+    burst_delay = args.burst_delay
+    total_chunks_est = (frame_size + BYTES_PER_CHUNK - 1) // BYTES_PER_CHUNK
     chunk_delay = args.chunk_delay
+    if chunk_delay is None:
+        chunk_delay = (0.9 / args.fps) / total_chunks_est
     frame_period = 1.0 / args.fps
     t_start = time.monotonic()
 
@@ -96,7 +101,10 @@ def stream_frames(url, width, height, dest, sock, args):
                 )
                 sock.sendto(header + chunk, dest)
                 if i < total_chunks - 1:
-                    time.sleep(chunk_delay)
+                    if burst_size > 0 and (i + 1) % burst_size == 0:
+                        time.sleep(burst_delay)
+                    elif burst_size == 0:
+                        time.sleep(chunk_delay)
             frame_id = (frame_id + 1) & 0xFFFF
             frame_count += 1
 
@@ -139,8 +147,13 @@ def main():
                         help="Grid layout (e.g. 1x2) — overrides --width/--height")
     parser.add_argument("--panel-size", default="128x64",
                         help="Physical panel size (default: 128x64)")
-    parser.add_argument("--chunk-delay", type=float, default=0.002,
-                        help="Delay between UDP chunks in seconds (default: 0.002)")
+    parser.add_argument("--chunk-delay", type=float, default=None,
+                        help="Delay between UDP chunks in seconds. "
+                             "Auto-calculated from fps when omitted (burst-size=0 only).")
+    parser.add_argument("--burst-size", type=int, default=0,
+                        help="Packets per burst (default: 0=uniform chunk-delay mode)")
+    parser.add_argument("--burst-delay", type=float, default=0.003,
+                        help="Pause between bursts in seconds (default: 0.003)")
     args = parser.parse_args()
 
     if args.layout:
