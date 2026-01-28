@@ -90,9 +90,9 @@ fn main() -> ! {
     };
 
     let bitmap_udp_socket = {
-        static mut BITMAP_UDP_RX_DATA: [u8; 32768] = [0; 32768];
+        static mut BITMAP_UDP_RX_DATA: [u8; 65536] = [0; 65536];
         static mut BITMAP_UDP_TX_DATA: [u8; 64] = [0; 64];
-        static mut BITMAP_UDP_RX_META: [UdpPacketMetadata; 24] = [UdpPacketMetadata::EMPTY; 24];
+        static mut BITMAP_UDP_RX_META: [UdpPacketMetadata; 48] = [UdpPacketMetadata::EMPTY; 48];
         static mut BITMAP_UDP_TX_META: [UdpPacketMetadata; 1] = [UdpPacketMetadata::EMPTY; 1];
         let rx = unsafe {
             UdpSocketBuffer::new(&mut BITMAP_UDP_RX_META[..], &mut BITMAP_UDP_RX_DATA[..])
@@ -274,9 +274,10 @@ fn main() -> ! {
             iface.poll(time).ok();
         }
 
-        // Slow path: only run non-bitmap work on 1ms tick boundaries.
-        // This keeps the tight loop (poll MAC + drain bitmap) as fast as possible.
-        if !timer_fired {
+        // Slow path: only run non-bitmap work every 5ms.
+        // This keeps the tight loop (poll MAC + drain bitmap) running most of the time,
+        // preventing MAC RX overflow during bitmap streaming.
+        if !timer_fired || (time_ms % 5 != 0) {
             continue;
         }
 
@@ -360,6 +361,9 @@ fn main() -> ! {
                     // Redraw at new virtual size
                     let total = (w as u32) * (h as u32);
                     r.context.hub75.set_img_param(w, total as u32);
+                    let (rb_w, rb_len) = r.context.hub75.get_img_param();
+                    writeln!(r.context.output, "TFTP: set_img_param({}, {}) -> readback({}, {})",
+                        w, total, rb_w, rb_len).ok();
                     r.context.hub75.write_img_data(0, patterns::grid(w, h));
                     r.context.hub75.swap_buffers();
                 } else {
@@ -467,6 +471,9 @@ fn main() -> ! {
                 }
             }
         }
+        // Drain MAC between slow-path blocks to prevent bitmap UDP overflow
+        iface.poll(time).ok();
+
         // udp:6454: artnet
         {
             let socket = iface.get_socket::<UdpSocket>(udp_server_handle);
@@ -493,6 +500,8 @@ fn main() -> ! {
             };
         }
         // (bitmap UDP is handled in the fast path at top of loop)
+        iface.poll(time).ok();
+
         // tcp:80: HTTP server (two sockets — one accepts while the other closes)
         {
             let http_ip = match iface.ip_addrs()[0].address() {

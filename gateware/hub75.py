@@ -519,19 +519,19 @@ class Output(Module):
                 r_pins,
                 output_bit,
                 buffer_select,
-                buffer_reader.dat_r[0:8],
+                buffer_reader.dat_r[16:24],
             )
             self.submodules += RowColorOutput(
                 g_pins,
                 output_bit,
                 buffer_select,
-                buffer_reader.dat_r[8:16],
+                buffer_reader.dat_r[0:8],
             )
             self.submodules += RowColorOutput(
                 b_pins,
                 output_bit,
                 buffer_select,
-                buffer_reader.dat_r[16:24],
+                buffer_reader.dat_r[8:16],
             )
 
             self.comb += [buffer_reader.adr.eq(address)]

@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.5.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.7.0-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -9,7 +9,7 @@ A complete FPGA-based LED panel controller for **HUB75** displays, built on the 
 
 ## Features
 
-- **HUB75 LED Panel Driver** - Configurable output count (default 6, up to 16 via `--outputs`), supports J1–J6
+- **HUB75 LED Panel Driver** - 6 outputs (J1–J6) with 2-panel chaining (up to 12 panels total)
 - **DHCP Networking** - Automatic IP via DHCP with unique MAC from SPI flash
 - **TFTP Boot Config** - Per-board YAML layout config fetched at boot via `<mac>.yml`
 - **HTTP REST API** - Web status page and JSON API on port 80
@@ -209,18 +209,20 @@ Connect via `telnet <ip> 23` to access the management console:
 
 ## Configuration
 
-### HUB75 Output Count
+### HUB75 Output Count & Chain Length
 
-The number of HUB75 outputs must be set consistently in **two places**:
+The number of HUB75 outputs and chain length must be set consistently:
 
 | File | Setting | Description |
 |------|---------|-------------|
 | `build.sh` | `OUTPUTS=6` | Passed to gateware build (`--outputs`) |
-| `sw_rust/barsign_disp/src/hub75.rs` | `const OUTPUTS: u8 = 6` | Firmware panel register count |
+| `build.sh` | `CHAIN_LENGTH=2` | Panels per output chain (`--chain-length`) |
+| `sw_rust/barsign_disp/src/hub75.rs` | `const OUTPUTS: u8 = 6` | Firmware output count |
+| `sw_rust/barsign_disp/src/hub75.rs` | `const CHAIN_LENGTH: u8 = 2` | Firmware chain length |
 
-Both must match. A mismatch (e.g., firmware accessing panel CSRs that don't exist in the bitstream) will crash the SoC. The `layout.rs` constant `MAX_OUTPUTS` should also match.
+Both outputs and chain length must match between gateware and firmware. A mismatch (e.g., firmware accessing panel CSRs that don't exist in the bitstream) will crash the SoC. The `layout.rs` constants `MAX_OUTPUTS` and `MAX_CHAIN` should also match.
 
-After changing the output count, rebuild everything:
+After changing output count or chain length, rebuild everything:
 ```bash
 ./build.sh bitstream pac firmware
 ```
@@ -241,6 +243,17 @@ panel_width: 128
 panel_height: 64
 J1: 0,0
 ```
+
+Example config for 2 daisy-chained panels on J1 (2x1 grid):
+
+```yaml
+grid: 2x1
+panel_width: 128
+panel_height: 64
+J1: 0,0 1,0
+```
+
+Space-separated positions per output assign chain slots: the first position is chain slot 0 (directly connected), the second is chain slot 1 (daisy-chained). Each output supports up to 2 panels.
 
 Place config files in your TFTP root directory. The layout is applied automatically at boot.
 

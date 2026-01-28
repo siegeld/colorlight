@@ -60,7 +60,10 @@ import hub75
 import helper
 
 # Panel configurations: columns, rows, scan rate (rows per address cycle)
+# "256x64" is two daisy-chained 128x64 panels treated as one wide panel
+# (workaround for chain_length_2>0 gateware bug — use columns=256 with chain_length_2=0)
 PANELS = {
+    "256x64": {"columns": 256, "rows": 64, "scan": 32},
     "128x64": {"columns": 128, "rows": 64, "scan": 32},
     "96x48":  {"columns": 96,  "rows": 48, "scan": 24},
     "64x32":  {"columns": 64,  "rows": 32, "scan": 16},
@@ -136,6 +139,7 @@ class BaseSoC(SoCCore):
         ip_address="10.11.6.250",
         panel="96x48",
         n_outputs=6,
+        chain_length_2=1,
         **kwargs
     ):
         platform = colorlight_5a_75e.Platform(revision=revision)
@@ -245,7 +249,8 @@ class BaseSoC(SoCCore):
             columns=panel_cfg["columns"],
             rows=panel_cfg["rows"],
             scan=panel_cfg["scan"],
-            n_outputs=n_outputs
+            n_outputs=n_outputs,
+            chain_length_2=chain_length_2
         )
 
         # Ethernet / Etherbone ---------------------------------------------------------------------
@@ -338,7 +343,17 @@ def main():
         type=int,
         help="Number of HUB75 outputs (default: 6)",
     )
+    parser.add_argument(
+        "--chain-length",
+        default=2,
+        type=int,
+        help="Panels per HUB75 output chain (default: 2, log2 passed to gateware)",
+    )
     args = parser.parse_args()
+
+    # Convert chain length to log2 value for gateware
+    import math
+    chain_length_2 = int(math.log2(args.chain_length)) if args.chain_length > 1 else 0
 
     soc = BaseSoC(
         revision=args.revision,
@@ -346,6 +361,7 @@ def main():
         ip_address=args.ip_address,
         panel=args.panel,
         n_outputs=args.outputs,
+        chain_length_2=chain_length_2,
         **soc_core_argdict(args)
     )
     builder_options = builder_argdict(args)

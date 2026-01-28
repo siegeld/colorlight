@@ -19,7 +19,7 @@ pub struct BitmapStats {
     pub last_width: u16,
     pub last_height: u16,
     pub last_data_len: u16,
-    pub chunks_received: u32,
+    pub chunks_received: u16,
     pub frame_interval_ms: u32,
     pub avg_interval_ms: u32,
     pub jitter_ms: u32,
@@ -51,7 +51,7 @@ impl BitmapStats {
 
 pub struct BitmapReceiver {
     current_frame_id: u16,
-    chunks_received: u32, // bitmask, supports up to 32 chunks
+    chunks_count: u16,     // number of chunks received for current frame
     total_chunks: u8,
     width: u16,
     height: u16,
@@ -63,7 +63,7 @@ impl BitmapReceiver {
     pub fn new() -> Self {
         Self {
             current_frame_id: u16::MAX, // sentinel: ensures first packet triggers reset
-            chunks_received: 0,
+            chunks_count: 0,
             total_chunks: 0,
             width: 0,
             height: 0,
@@ -122,7 +122,7 @@ impl BitmapReceiver {
         self.stats.last_width = width;
         self.stats.last_height = height;
 
-        if total_chunks == 0 || chunk_index >= total_chunks || total_chunks > 32 {
+        if total_chunks == 0 || chunk_index >= total_chunks {
             self.stats.packets_bad_header += 1;
             return false;
         }
@@ -132,10 +132,19 @@ impl BitmapReceiver {
         // New frame: handle incomplete previous frame, then reset
         let mut swapped_partial = false;
         if frame_id != self.current_frame_id {
-            if self.chunks_received != 0 {
-                let received = self.chunks_received.count_ones();
-                let total = self.total_chunks as u32;
-                if total > 0 && received >= total.saturating_sub(2) {
+            // Reject frames whose dimensions don't match the configured image size.
+            // With chain_length_2 layouts the image width is the virtual width (e.g. 256),
+            // and the sender must match it — otherwise SDRAM row addressing breaks.
+            let (cur_w, cur_len) = hub75.get_img_param();
+            let incoming_len = width as u32 * height as u32;
+            if cur_w != 0 && (width != cur_w || incoming_len != cur_len) {
+                self.stats.packets_bad_header += 1;
+                return false;
+            }
+
+            if self.chunks_count > 0 {
+                let total = self.total_chunks as u16;
+                if total > 0 && self.chunks_count >= total.saturating_sub(2) {
                     // Close enough — swap the partial frame
                     hub75.swap_buffers();
                     self.stats.frames_partial += 1;
@@ -146,12 +155,10 @@ impl BitmapReceiver {
                 }
             }
             self.current_frame_id = frame_id;
-            self.chunks_received = 0;
+            self.chunks_count = 0;
             self.total_chunks = total_chunks;
             self.width = width;
             self.height = height;
-            let length = width as u32 * height as u32;
-            hub75.set_img_param(width, length);
         }
 
         // Write pixel data to back buffer
@@ -164,16 +171,17 @@ impl BitmapReceiver {
         });
         hub75.write_img_data(pixel_offset, pixels);
 
-        // Mark chunk as received
-        self.chunks_received |= 1 << chunk_index;
-        self.stats.chunks_received = self.chunks_received;
+        // Track received count
+        self.chunks_count += 1;
+        self.stats.chunks_received = self.chunks_count;
 
-        // Check if all chunks received
-        let expected_mask = (1u32 << self.total_chunks) - 1;
-        let complete = self.chunks_received == expected_mask;
+        // Complete when last chunk arrives (sender sends sequentially)
+        // or when count reaches total (all chunks received)
+        let complete = chunk_index == total_chunks - 1
+            || self.chunks_count >= self.total_chunks as u16;
         if complete {
             self.stats.frames_completed += 1;
-            self.chunks_received = 0; // ready for next frame
+            self.chunks_count = 0; // ready for next frame
             self.update_timing(time_ms);
         }
         complete || swapped_partial

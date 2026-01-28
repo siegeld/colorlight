@@ -8,6 +8,7 @@ import struct
 import math
 
 PANELS = {
+    "256x64": {"columns": 256, "rows": 64},
     "128x64": {"columns": 128, "rows": 64},
     "96x48":  {"columns": 96,  "rows": 48},
     "64x32":  {"columns": 64,  "rows": 32},

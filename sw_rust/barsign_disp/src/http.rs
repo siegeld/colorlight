@@ -252,13 +252,15 @@ a{{color:#7a9af0;text-decoration:none}}\
         ctx.mac_overflow, ctx.mac_crc_err, ctx.mac_preamble_err).ok();
     // Panels card
     write!(resp, "<div class=c><h2>Panels</h2><table>").ok();
-    for (i, a) in l.assignments.iter().enumerate() {
-        match a {
-            Some((col, row)) => {
-                write!(resp, "<tr><td>J{}</td><td>{},{}</td></tr>", i + 1, col, row).ok();
-            }
-            None => {
-                write!(resp, "<tr><td>J{}</td><td>-</td></tr>", i + 1).ok();
+    for (i, chain_slots) in l.assignments.iter().enumerate() {
+        for (c, a) in chain_slots.iter().enumerate() {
+            match a {
+                Some((col, row)) => {
+                    write!(resp, "<tr><td>J{}[{}]</td><td>{},{}</td></tr>", i + 1, c, col, row).ok();
+                }
+                None => {
+                    write!(resp, "<tr><td>J{}[{}]</td><td>-</td></tr>", i + 1, c).ok();
+                }
             }
         }
     }
@@ -317,10 +319,26 @@ fn api_layout_get(resp: &mut HttpResponse, ctx: &Context) {
     write!(resp, r#""virtual_width":{},"virtual_height":{},"panels":{{"#,
         l.virtual_width(), l.virtual_height()).ok();
     let mut first = true;
-    for (i, a) in l.assignments.iter().enumerate() {
-        if let Some((col, row)) = a {
+    for (i, chain_slots) in l.assignments.iter().enumerate() {
+        // Check if any chain slot is assigned
+        let has_any = chain_slots.iter().any(|a| a.is_some());
+        if has_any {
             if !first { write!(resp, ",").ok(); }
-            write!(resp, r#""J{}":"{},{}""#, i + 1, col, row).ok();
+            write!(resp, r#""J{}":["#, i + 1).ok();
+            let mut first_slot = true;
+            for a in chain_slots.iter() {
+                if !first_slot { write!(resp, ",").ok(); }
+                match a {
+                    Some((col, row)) => {
+                        write!(resp, r#""{},{}""#, col, row).ok();
+                    }
+                    None => {
+                        write!(resp, "null").ok();
+                    }
+                }
+                first_slot = false;
+            }
+            write!(resp, "]").ok();
             first = false;
         }
     }
@@ -338,9 +356,29 @@ fn api_layout_post(req: &HttpRequest, resp: &mut HttpResponse, ctx: &mut Context
     for i in 1u8..=crate::layout::MAX_OUTPUTS as u8 {
         let key = [b'J', b'0' + i];
         if let Ok(key_str) = core::str::from_utf8(&key) {
-            if let Some(pos) = json_get_str(body, key_str) {
+            let idx = (i - 1) as usize;
+            // Try array format first: "J1":["0,0","1,0"]
+            if let Some(arr) = json_get_array(body, key_str) {
+                // Clear all chain slots for this output
+                for c in 0..crate::layout::MAX_CHAIN {
+                    ctx.layout.assignments[idx][c] = None;
+                }
+                for (chain, pos_str) in arr.iter().enumerate() {
+                    if chain >= crate::layout::MAX_CHAIN {
+                        break;
+                    }
+                    if let Some((col, row)) = crate::layout::parse_pos_spec(pos_str) {
+                        ctx.layout.assignments[idx][chain] = Some((col, row));
+                    }
+                }
+            } else if let Some(pos) = json_get_str(body, key_str) {
+                // Backward compat: "J1":"0,0"
+                ctx.layout.assignments[idx][0] = None;
+                for c in 1..crate::layout::MAX_CHAIN {
+                    ctx.layout.assignments[idx][c] = None;
+                }
                 if let Some((col, row)) = crate::layout::parse_pos_spec(pos) {
-                    ctx.layout.assignments[(i - 1) as usize] = Some((col, row));
+                    ctx.layout.assignments[idx][0] = Some((col, row));
                 }
             }
         }
@@ -503,6 +541,58 @@ fn parse_usize(s: &str) -> Result<usize, ()> {
         r = r.checked_mul(10).ok_or(())?.checked_add((b - b'0') as usize).ok_or(())?;
     }
     Ok(r)
+}
+
+/// Extract an array of string values for `key` from simple JSON: `{"key":["v1","v2"],...}`.
+/// Returns up to 4 elements (enough for MAX_CHAIN=2 with headroom).
+fn json_get_array<'a>(json: &'a str, key: &str) -> Option<heapless::Vec<&'a str, 4>> {
+    let b = json.as_bytes();
+    let kb = key.as_bytes();
+    let len = b.len();
+    let mut i = 0;
+    while i < len {
+        if b[i] == b'"' {
+            let ks = i + 1;
+            let ke = ks + kb.len();
+            if ke < len && &b[ks..ke] == kb && b[ke] == b'"' {
+                let mut p = ke + 1;
+                while p < len && b[p] == b' ' { p += 1; }
+                if p < len && b[p] == b':' {
+                    p += 1;
+                    while p < len && b[p] == b' ' { p += 1; }
+                    if p < len && b[p] == b'[' {
+                        // Parse array of strings
+                        p += 1;
+                        let mut result = heapless::Vec::new();
+                        loop {
+                            while p < len && (b[p] == b' ' || b[p] == b',') { p += 1; }
+                            if p >= len || b[p] == b']' { break; }
+                            if b[p] == b'"' {
+                                let vs = p + 1;
+                                let mut j = vs;
+                                while j < len && b[j] != b'"' { j += 1; }
+                                if j < len {
+                                    if let Ok(s) = core::str::from_utf8(&b[vs..j]) {
+                                        result.push(s).ok();
+                                    }
+                                    p = j + 1;
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        if !result.is_empty() {
+                            return Some(result);
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Extract a string value for `key` from simple JSON: `{"key":"value",...}`.

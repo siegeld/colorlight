@@ -1,7 +1,8 @@
 /// Panel layout configuration for multi-panel virtual displays.
-/// Maps physical J-connectors (outputs 0–5) to grid positions.
+/// Maps physical J-connectors (outputs 0–5) and chain slots to grid positions.
 
 pub const MAX_OUTPUTS: usize = 6;
+pub const MAX_CHAIN: usize = 2;
 const POS_UNIT: u16 = 16; // gateware multiplier
 
 pub struct LayoutConfig {
@@ -9,14 +10,14 @@ pub struct LayoutConfig {
     pub panel_height: u16, // physical panel height (e.g., 48)
     pub grid_cols: u8,     // virtual grid columns
     pub grid_rows: u8,     // virtual grid rows
-    /// For each output 0–3: Some((col, row)) if assigned, None if unused
-    pub assignments: [Option<(u8, u8)>; MAX_OUTPUTS],
+    /// For each output 0–5 and chain slot 0–1: Some((col, row)) if assigned, None if unused
+    pub assignments: [[Option<(u8, u8)>; MAX_CHAIN]; MAX_OUTPUTS],
 }
 
 impl LayoutConfig {
     pub fn single_panel(width: u16, height: u16) -> Self {
-        let mut assignments = [None; MAX_OUTPUTS];
-        assignments[0] = Some((0, 0));
+        let mut assignments = [[None; MAX_CHAIN]; MAX_OUTPUTS];
+        assignments[0][0] = Some((0, 0));
         Self {
             panel_width: width,
             panel_height: height,
@@ -39,13 +40,22 @@ impl LayoutConfig {
     }
 
     /// Apply layout to HUB75 hardware: sets image_width and all panel_param CSRs.
+    ///
+    /// HUB75 shift order: hw chain 0 is shifted first and ends up on the
+    /// far panel (end of daisy chain); hw chain 1 is shifted last and stays
+    /// on the near panel (directly connected).  Config chain index maps
+    /// directly to hw chain index — no reversal needed.
+    /// Config example: `J1: 0,0 1,0` → chain 0 = far/left panel at (0,0),
+    ///                                   chain 1 = near/right panel at (1,0).
     pub fn apply(&self, hub75: &mut crate::hub75::Hub75) {
         hub75.set_img_param(self.virtual_width(), self.virtual_length());
-        for (output, assignment) in self.assignments.iter().enumerate() {
-            if let Some((col, row)) = assignment {
-                let x = (*col as u16 * self.panel_width / POS_UNIT) as u8;
-                let y = (*row as u16 * self.panel_height / POS_UNIT) as u8;
-                hub75.set_panel_param(output as u8, 0, x, y, 0);
+        for (output, chain_slots) in self.assignments.iter().enumerate() {
+            for (chain, assignment) in chain_slots.iter().enumerate() {
+                if let Some((col, row)) = assignment {
+                    let x = (*col as u16 * self.panel_width / POS_UNIT) as u8;
+                    let y = (*row as u16 * self.panel_height / POS_UNIT) as u8;
+                    hub75.set_panel_param(output as u8, chain as u8, x, y, 0);
+                }
             }
         }
     }
@@ -56,11 +66,12 @@ impl LayoutConfig {
     /// - `grid=2x1` — set grid dimensions
     /// - `panel_width=96` — physical panel width
     /// - `panel_height=48` — physical panel height
-    /// - `J1=0,0` through `J6=7,7` — assign output to grid position
+    /// - `J1=0,0` or `J1=0,0 1,0` — assign output chain slots to grid positions
+    ///   (space-separated positions, second position is chain slot 1)
     pub fn parse(text: &str) -> Option<Self> {
         let mut config = Self::single_panel(96, 48);
         // Clear default assignment — config should be explicit
-        config.assignments = [None; MAX_OUTPUTS];
+        config.assignments = [[None; MAX_CHAIN]; MAX_OUTPUTS];
 
         for line in text.lines() {
             let line = line.trim();
@@ -91,12 +102,19 @@ impl LayoutConfig {
                         }
                     }
                     _ => {
-                        // Try J1–J4
+                        // Try J1–J6
                         if let Some(rest) = key.strip_prefix('J') {
                             if let Ok(n) = parse_u8(rest) {
                                 if n >= 1 && n <= MAX_OUTPUTS as u8 {
-                                    if let Some((col, row)) = parse_pos(value) {
-                                        config.assignments[(n - 1) as usize] = Some((col, row));
+                                    let idx = (n - 1) as usize;
+                                    // Split value on whitespace for chain slots
+                                    for (chain, pos_str) in value.split_ascii_whitespace().enumerate() {
+                                        if chain >= MAX_CHAIN {
+                                            break;
+                                        }
+                                        if let Some((col, row)) = parse_pos(pos_str) {
+                                            config.assignments[idx][chain] = Some((col, row));
+                                        }
                                     }
                                 }
                             }

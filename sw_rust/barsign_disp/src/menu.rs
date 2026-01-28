@@ -274,12 +274,16 @@ pub const ROOT_MENU: Menu<Context> = Menu {
                     },
                     Parameter::Optional {
                         parameter_name: "pos",
-                        help: Some("col,row (e.g. 1,0)"),
+                        help: Some("col,row for chain 0"),
+                    },
+                    Parameter::Optional {
+                        parameter_name: "pos2",
+                        help: Some("col,row for chain 1"),
                     },
                 ],
             },
             command: "panel",
-            help: Some("Assign panel output to grid position"),
+            help: Some("Assign panel output + chain to grid position(s)"),
         },
     ],
     entry: None,
@@ -548,7 +552,7 @@ fn bitmap_status(
     writeln!(context.output, "  last chunk: {}/{}", s.last_chunk_index, s.last_total_chunks).unwrap();
     writeln!(context.output, "  last size: {}x{}", s.last_width, s.last_height).unwrap();
     writeln!(context.output, "  last data len: {}", s.last_data_len).unwrap();
-    writeln!(context.output, "  chunks_received: 0b{:032b}", s.chunks_received).unwrap();
+    writeln!(context.output, "  chunks_received: {}/{}", s.chunks_received, s.last_total_chunks).unwrap();
     writeln!(context.output, "  MAC overflow: {}", context.mac_overflow).unwrap();
     writeln!(context.output, "  MAC preamble: {}", context.mac_preamble_err).unwrap();
     writeln!(context.output, "  MAC CRC: {}", context.mac_crc_err).unwrap();
@@ -585,19 +589,24 @@ fn layout_cmd(
                 l.virtual_width(), l.virtual_height(),
                 l.panel_width, l.panel_height
             ).unwrap();
-            for (i, a) in l.assignments.iter().enumerate() {
-                if let Some((col, row)) = a {
-                    writeln!(context.output, "  J{} -> ({},{})", i + 1, col, row).unwrap();
+            for (i, chain_slots) in l.assignments.iter().enumerate() {
+                for (c, a) in chain_slots.iter().enumerate() {
+                    if let Some((col, row)) = a {
+                        writeln!(context.output, "  J{}[{}] -> ({},{})", i + 1, c, col, row).unwrap();
+                    }
                 }
             }
         }
         "apply" => {
             context.layout.apply(&mut context.hub75);
+            let (rb_w, rb_len) = context.hub75.get_img_param();
             let l = &context.layout;
-            write!(context.output, "Applied: {}x{}", l.virtual_width(), l.virtual_height()).unwrap();
-            for (i, a) in l.assignments.iter().enumerate() {
-                if let Some((col, row)) = a {
-                    write!(context.output, " J{}=({},{})", i + 1, col, row).unwrap();
+            write!(context.output, "Applied: {}x{} img={}x{}", l.virtual_width(), l.virtual_height(), rb_w, rb_len).unwrap();
+            for (i, chain_slots) in l.assignments.iter().enumerate() {
+                for (c, a) in chain_slots.iter().enumerate() {
+                    if let Some((col, row)) = a {
+                        write!(context.output, " J{}[{}]=({},{})", i + 1, c, col, row).unwrap();
+                    }
                 }
             }
             writeln!(context.output).unwrap();
@@ -629,16 +638,25 @@ fn panel_cmd(
     let output_arg: &str = argument_finder(item, args, "output").unwrap().unwrap();
 
     if output_arg == "show" {
-        for (i, a) in context.layout.assignments.iter().enumerate() {
-            match a {
-                Some((col, row)) => {
-                    writeln!(context.output, "J{}: ({},{})", i + 1, col, row).unwrap();
-                }
-                None => {
-                    writeln!(context.output, "J{}: (unassigned)", i + 1).unwrap();
+        for (i, chain_slots) in context.layout.assignments.iter().enumerate() {
+            for (c, a) in chain_slots.iter().enumerate() {
+                let (hx, hy, hr) = context.hub75.get_panel_param(i as u8, c as u8);
+                match a {
+                    Some((col, row)) => {
+                        writeln!(context.output, "J{}[{}]: ({},{})  hw=({},{},{})",
+                            i + 1, c, col, row, hx, hy, hr).unwrap();
+                    }
+                    None => {
+                        writeln!(context.output, "J{}[{}]: (unassigned)  hw=({},{},{})",
+                            i + 1, c, hx, hy, hr).unwrap();
+                    }
                 }
             }
         }
+        let (w, len) = context.hub75.get_img_param();
+        writeln!(context.output, "img: width={} length={}", w, len).unwrap();
+        let raw = unsafe { core::ptr::read_volatile(0xF0003000 as *const u32) };
+        writeln!(context.output, "CTRL raw: 0x{:08x}", raw).unwrap();
         return;
     }
 
@@ -657,23 +675,35 @@ fn panel_cmd(
     };
 
     let pos_arg = argument_finder(item, args, "pos").unwrap();
+    let pos2_arg = argument_finder(item, args, "pos2").unwrap();
+    let idx = (output_num - 1) as usize;
     match pos_arg {
         Some(pos_str) => {
-            if let Some((col, row)) = crate::layout::parse_pos_spec(pos_str) {
-                context.layout.assignments[(output_num - 1) as usize] = Some((col, row));
-                writeln!(context.output, "J{} -> ({},{})", output_num, col, row).unwrap();
-            } else {
-                writeln!(context.output, "Invalid position: {} (use col,row)", pos_str).unwrap();
+            // Chain 0 from pos, chain 1 from pos2
+            let positions: [Option<&str>; 2] = [Some(pos_str), pos2_arg];
+            for (chain, pos_opt) in positions.iter().enumerate() {
+                if let Some(part) = pos_opt {
+                    if let Some((col, row)) = crate::layout::parse_pos_spec(part) {
+                        context.layout.assignments[idx][chain] = Some((col, row));
+                        writeln!(context.output, "J{}[{}] -> ({},{})", output_num, chain, col, row).unwrap();
+                    } else {
+                        writeln!(context.output, "Invalid position: {} (use col,row)", part).unwrap();
+                    }
+                } else {
+                    context.layout.assignments[idx][chain] = None;
+                }
             }
         }
         None => {
             // No position given: show current assignment
-            match context.layout.assignments[(output_num - 1) as usize] {
-                Some((col, row)) => {
-                    writeln!(context.output, "J{}: ({},{})", output_num, col, row).unwrap();
-                }
-                None => {
-                    writeln!(context.output, "J{}: (unassigned)", output_num).unwrap();
+            for (c, a) in context.layout.assignments[idx].iter().enumerate() {
+                match a {
+                    Some((col, row)) => {
+                        writeln!(context.output, "J{}[{}]: ({},{})", output_num, c, col, row).unwrap();
+                    }
+                    None => {
+                        writeln!(context.output, "J{}[{}]: (unassigned)", output_num, c).unwrap();
+                    }
                 }
             }
         }

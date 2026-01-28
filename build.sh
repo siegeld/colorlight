@@ -20,6 +20,7 @@ IP_ADDRESS="10.11.6.250"
 CABLE="usb-blaster"
 PANEL="128x64"
 OUTPUTS=6
+CHAIN_LENGTH=2
 PATTERN="grid"
 BUILD_DIR="build/colorlight_5a_75e"
 BITSTREAM="${BUILD_DIR}/gateware/colorlight_5a_75e.bit"
@@ -104,8 +105,8 @@ build_bitstream() {
     print_header "Building FPGA Bitstream"
     check_docker_image
 
-    print_step "Running LiteX build (revision ${REVISION}, IP ${IP_ADDRESS}, panel ${PANEL})"
-    docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${PANEL} --outputs ${OUTPUTS} --build"
+    print_step "Running LiteX build (revision ${REVISION}, IP ${IP_ADDRESS}, panel ${PANEL}, chain ${CHAIN_LENGTH})"
+    docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${PANEL} --outputs ${OUTPUTS} --chain-length ${CHAIN_LENGTH} --build"
 
     if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
         print_success "Bitstream built: ${BITSTREAM}"
@@ -124,10 +125,10 @@ build_all_panels() {
     check_docker_image
     mkdir -p "${SCRIPT_DIR}/bitstreams"
 
-    for panel in 128x64 96x48 64x32 64x64; do
+    for panel in 256x64 128x64 96x48 64x32 64x64; do
         echo ""
         print_step "Building bitstream for ${panel}..."
-        docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${panel} --outputs ${OUTPUTS} --build"
+        docker_run "./gateware/colorlight.py --revision ${REVISION} --ip-address ${IP_ADDRESS} --panel ${panel} --outputs ${OUTPUTS} --chain-length ${CHAIN_LENGTH} --build"
         if [[ -f "${SCRIPT_DIR}/${BITSTREAM}" ]]; then
             cp "${SCRIPT_DIR}/${BITSTREAM}" "${SCRIPT_DIR}/bitstreams/${panel}.bit"
             print_success "bitstreams/${panel}.bit"
@@ -437,8 +438,9 @@ OPTIONS:
     -r, --revision REV      Board revision (default: 8.2)
     -i, --ip IP             IP address for firmware (default: 10.11.6.250)
     -c, --cable CABLE       JTAG cable type (default: usb-blaster)
-    -p, --panel PANEL       Panel type: 128x64, 96x48, 64x32, 64x64 (default: 128x64)
+    -p, --panel PANEL       Panel type: 256x64, 128x64, 96x48, 64x32, 64x64 (default: 128x64)
     -o, --outputs N         Number of HUB75 outputs (default: 6)
+    -l, --chain-length N    Panels per HUB75 output chain (default: 2)
     -t, --pattern PATTERN   Test pattern: grid, rainbow, solid_white, solid_red,
                             solid_green, solid_blue (default: grid)
     --host-ip IP            Host IP for TFTP server (auto-detected if not set)
@@ -543,6 +545,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -o|--outputs)
             OUTPUTS="$2"
+            shift 2
+            ;;
+        -l|--chain-length)
+            CHAIN_LENGTH="$2"
             shift 2
             ;;
         -t|--pattern)

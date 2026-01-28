@@ -13,6 +13,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.0] - 2026-01-27
+
+### Fixed
+- **R/G/B color channels** — Physical pin mapping on Colorlight 5A-75E was incorrect (connector pins[0]=Blue, pins[1]=Red, pins[2]=Green). Gateware `Output` class now maps pixel data bits to correct physical pins. Also eliminates a bottom-row display artifact.
+- **Bitmap UDP overwriting virtual width** — `process_packet()` called `set_img_param()` on every new frame, overwriting the TFTP-configured virtual width (e.g. 256 for chain_length_2) with the sender's physical width (128). Added dimension validation that rejects frames not matching the configured image size.
+
+### Changed
+- **Bitmap chunk tracking** — Replaced bitmask (u32/u64) with u16 counter, supporting up to 255 chunks per frame (scales to 12+ panel virtual displays). Frame completes when last chunk arrives even if earlier chunks were dropped by MAC overflow.
+- **Slow-path frequency** — Non-bitmap work (telnet/DHCP/HTTP/ArtNet) runs every 5ms instead of 1ms, with extra `iface.poll()` calls between blocks. Reduces MAC RX overflow during bitmap streaming.
+- **UDP receive buffer** — Bitmap socket increased from 32KB/24 metadata to 65KB/48 metadata slots.
+
+### Added
+- **256×64 bitstream** — Pre-built bitstream for 2×1 panel chain layout.
+- **Debug readbacks** — TFTP handler logs `set_img_param` readback; `panel show` displays raw CTRL register; `layout apply` shows image params after apply.
+
+---
+
+## [1.6.0] - 2026-01-27
+
+### Added
+- **Panel chaining** — Each HUB75 output now supports 2 daisy-chained panels (`chain_length_2=1` in gateware), doubling panel capacity from 6 to 12 with zero extra EBRs.
+- **YAML chain config syntax** — Space-separated positions per output: `J1: 0,0 1,0` assigns chain slot 0 at (0,0) and chain slot 1 at (1,0).
+- **Telnet chain commands** — `panel show` displays all chain slots; `panel J1 0,0 1,0` sets both chain positions at once.
+- **Web UI chain display** — Panels card shows `J1[0]`, `J1[1]` etc. per chain slot.
+- **HTTP API chain support** — `GET /api/layout` returns arrays per output: `"J1":["0,0","1,0"]`; `POST /api/layout` accepts both array and legacy string format.
+- **`--chain-length` build option** — `build.sh -l 2` and gateware `--chain-length 2` configure the chain depth.
+
+### Changed
+- `gateware/colorlight.py`: `BaseSoC` accepts `chain_length_2`, passed to `hub75.Hub75()` constructor.
+- `build.sh`: New `CHAIN_LENGTH=2` config variable, `-l|--chain-length` CLI option.
+- `sw_rust/barsign_disp/src/hub75.rs`: `CHAIN_LENGTH` = 2.
+- `sw_rust/barsign_disp/src/layout.rs`: `assignments` changed from `[Option<(u8,u8)>; 6]` to `[[Option<(u8,u8)>; 2]; 6]`; `MAX_CHAIN = 2` added; `parse()` splits values on whitespace for chain slots.
+- `sw_rust/barsign_disp/src/menu.rs`: `layout show/apply` and `panel show/set` display `J#[chain]` notation.
+- `sw_rust/barsign_disp/src/http.rs`: Panels table, `api_layout_get/post` updated for chain arrays; new `json_get_array()` helper.
+
+---
+
 ## [1.5.0] - 2026-01-27
 
 ### Changed
@@ -316,6 +353,9 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.7.0 | 2026-01-27 | Fix color channels, bitmap dimension validation, streaming improvements |
+| 1.6.0 | 2026-01-27 | Panel chaining: 2 panels per output, up to 12 total |
+| 1.5.0 | 2026-01-27 | Expand HUB75 outputs 4→6, JTAG retry logic |
 | 1.4.1 | 2026-01-27 | Fix HTTP server stuck sockets with idle timeout |
 | 1.4.0 | 2026-01-26 | Parameterize HUB75 outputs (8→4), nrxslots 4→8 |
 | 1.3.1 | 2026-01-26 | Pin LiteX to 2025.12, reproducible Docker builds |
