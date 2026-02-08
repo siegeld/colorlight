@@ -82,7 +82,7 @@ PATTERNS = {
 }
 
 
-def send_rgb_data(host, port, rgb_data, width, height, frame_id=None):
+def send_rgb_data(host, port, rgb_data, width, height, frame_id=None, delay=0.01):
     if frame_id is None:
         frame_id = int(time.time()) & 0xFFFF
     total_chunks = (len(rgb_data) + BYTES_PER_CHUNK - 1) // BYTES_PER_CHUNK
@@ -94,7 +94,8 @@ def send_rgb_data(host, port, rgb_data, width, height, frame_id=None):
             HEADER_FMT, b"BM", frame_id, i, total_chunks, width, height
         )
         sock.sendto(header + chunk, (host, port))
-        time.sleep(0.01)
+        if delay > 0:
+            time.sleep(delay)
     sock.close()
 
 
@@ -111,8 +112,9 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=7000)
     parser.add_argument("--width", type=int, default=128)
     parser.add_argument("--height", type=int, default=64)
+    parser.add_argument("--delay", type=float, default=0.01, help="Delay between packets in seconds")
     args = parser.parse_args()
 
     rgb_data = PATTERNS[args.pattern](args.width, args.height)
-    send_rgb_data(args.host, args.port, rgb_data, args.width, args.height)
+    send_rgb_data(args.host, args.port, rgb_data, args.width, args.height, delay=args.delay)
     print(f"Sent '{args.pattern}' pattern ({args.width}x{args.height})")
