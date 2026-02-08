@@ -60,6 +60,7 @@ pub struct Context {
     pub mac_overflow: u32,
     pub mac_preamble_err: u32,
     pub mac_crc_err: u32,
+    pub ring_overflow: u32,
 }
 
 impl Context {
@@ -556,6 +557,7 @@ fn bitmap_status(
     writeln!(context.output, "  MAC overflow: {}", context.mac_overflow).unwrap();
     writeln!(context.output, "  MAC preamble: {}", context.mac_preamble_err).unwrap();
     writeln!(context.output, "  MAC CRC: {}", context.mac_crc_err).unwrap();
+    writeln!(context.output, "  Ring overflow: {}", context.ring_overflow).unwrap();
 }
 
 fn debug_toggle(

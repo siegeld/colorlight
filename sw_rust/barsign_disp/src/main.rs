@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::convert::TryInto;
 use core::fmt::Write as _;
 
 use barsign_disp::*;
@@ -15,6 +14,48 @@ use layout::LayoutConfig;
 use litex_pac as pac;
 use riscv_rt::entry;
 use tftp_config::TftpConfigLoader;
+
+// ============================================================================
+// VexRiscv External Interrupt Handler
+// ============================================================================
+// VexRiscv interrupt setup:
+// 1. Write trap handler address to mtvec (WRITE_ONLY - reads return 0)
+// 2. Set bit N in CSR 0xBC0 (IRQ_MASK) to enable IRQ N
+// 3. Set mie.MEIE and mstatus.MIE
+
+extern "C" {
+    fn ethmac();  // Defined in ethernet.rs - drains all pending packets
+}
+
+// Trap handler: MINIMAL - just disable ev_enable and return.
+// Don't even clear ev_pending - let main loop handle everything.
+//
+// ETHMAC base = 0xF0001800
+// sram_writer_ev_enable  = base + 0x14 = 0xF0001814
+core::arch::global_asm!(r#"
+.section .text.trap_handler
+.global _trap_handler
+.align 4
+_trap_handler:
+    # Save t0 only
+    addi sp, sp, -4
+    sw t0, 0(sp)
+
+    # Disable interrupt: write 0 to ev_enable at 0xF0001814
+    lui t0, 0xF0002
+    addi t0, t0, -0x7EC  # t0 = 0xF0001814 (ev_enable)
+    sw zero, 0(t0)
+
+    # Restore t0
+    lw t0, 0(sp)
+    addi sp, sp, 4
+
+    mret
+"#);
+
+extern "C" {
+    fn _trap_handler();
+}
 use smoltcp::iface::{InterfaceBuilder, NeighborCache, Routes};
 use smoltcp::socket::{
     Dhcpv4Event, Dhcpv4Socket, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket,
@@ -64,6 +105,26 @@ fn main() -> ! {
 
     // Start with no IP — DHCP will configure it
     let device = Eth::new(peripherals.ethmac, peripherals.ethmem);
+
+    // Initialize ISR counter at 0x40020000 to zero
+    unsafe {
+        core::ptr::write_volatile(0x40020000 as *mut u32, 0);
+    }
+
+    // Set up mtvec but DON'T enable interrupts yet (wait for HTTP trigger)
+    unsafe {
+        // 1. Write trap handler address to mtvec (WRITE_ONLY - reads return 0, but writes work)
+        let trap_addr = _trap_handler as usize;
+        core::arch::asm!("csrw mtvec, {}", in(reg) trap_addr);
+        ethernet::set_trap_addr(trap_addr);
+
+        // Read back mtvec for debugging (will be 0 due to WRITE_ONLY mode)
+        let mtvec: usize;
+        core::arch::asm!("csrr {}, mtvec", out(reg) mtvec);
+        ethernet::set_debug_mtvec(mtvec);
+    }
+    // NOTE: Interrupts disabled - will be enabled via HTTP /api/irq/enable for testing
+
     let mut neighbor_cache_entries = [None; 8];
     let neighbor_cache = NeighborCache::new(&mut neighbor_cache_entries[..]);
     let mut ip_addrs = [IpCidr::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0)];
@@ -195,6 +256,7 @@ fn main() -> ! {
         mac_overflow: 0,
         mac_preamble_err: 0,
         mac_crc_err: 0,
+        ring_overflow: 0,
     };
 
     let mut r = menu::Runner::new(&menu::ROOT_MENU, &mut buffer, context);
@@ -246,6 +308,9 @@ fn main() -> ! {
 
         loop_counter = loop_counter.wrapping_add(1);
 
+        // Check if ISR fired (ev_enable=0) and re-enable after draining
+        ethernet::check_and_reenable_interrupt();
+
         // Raw fast path: drain bitmap UDP packets directly from MAC hardware,
         // bypassing smoltcp to eliminate double-copy overhead.
         macro_rules! drain_raw_bitmap {
@@ -264,7 +329,6 @@ fn main() -> ! {
                                 r.context.hub75.set_mode(hub75::OutputMode::FullColor);
                                 r.context.hub75.on();
                                 r.context.animation = menu::Animation::None;
-
                             }
                             r.context.bitmap_stats = bitmap_rx.stats;
                             device.ack_rx();
@@ -276,9 +340,7 @@ fn main() -> ! {
             }};
         }
 
-        // Fast path: drain bitmap packets from MAC. Only call poll() when
-        // a non-bitmap packet blocks the queue — poll() is expensive on a
-        // 40MHz RISC-V and causes FIFO overflows if called unconditionally.
+        // Fast path: drain bitmap packets from MAC hardware directly.
         drain_raw_bitmap!();
 
         // Streaming flag: true while bitmap packets are arriving.
@@ -292,10 +354,7 @@ fn main() -> ! {
             if iface.device().peek_rx().is_none() { break; }
 
             if streaming {
-                // During streaming, discard non-bitmap packets instead of
-                // calling poll().  poll() processes TCP/DHCP state machines
-                // which stall the CPU for milliseconds and overflow the
-                // 8-slot MAC FIFO.  The sender already has our ARP entry.
+                // During streaming, discard non-bitmap packets
                 iface.device().ack_rx();
                 drain_raw_bitmap!();
             } else {
@@ -331,11 +390,12 @@ fn main() -> ! {
             continue;
         }
 
-        // Read MAC hardware error counters
+        // Read MAC hardware error counters and ring buffer overflow
         let (ovf, pre, crc) = iface.device().mac_errors();
         r.context.mac_overflow = ovf;
         r.context.mac_preamble_err = pre;
         r.context.mac_crc_err = crc;
+        r.context.ring_overflow = ethernet::ring_overflow_count() as u32;
 
         // DHCP: poll for configuration changes
         {
@@ -520,7 +580,7 @@ fn main() -> ! {
                 }
             }
         }
-        // Drain MAC between slow-path blocks to prevent bitmap UDP overflow
+        // Drain ring buffer between slow-path blocks
         drain_raw_bitmap!();
         iface.poll(time).ok();
 

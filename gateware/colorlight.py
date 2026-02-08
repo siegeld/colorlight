@@ -150,7 +150,7 @@ class BaseSoC(SoCCore):
             platform,
             sys_clk_freq,
             cpu_type="vexriscv",
-            cpu_variant="minimal",
+            cpu_variant="lite",  # lite supports external interrupts; minimal does not
             cpu_freq=sys_clk_freq,
             ident="LiteX SoC on Colorlight 5A-75E",
             ident_version=True,

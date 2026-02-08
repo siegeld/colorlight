@@ -166,6 +166,7 @@ pub fn handle_request(req: &HttpRequest, resp: &mut HttpResponse, ctx: &mut Cont
         (Method::Post, "/api/display/off")     => api_display_off(resp, ctx),
         (Method::Post, "/api/display/pattern") => api_display_pattern(req, resp, ctx),
         (Method::Get, "/api/bitmap/stats")     => api_bitmap_stats(resp, ctx),
+        (Method::Post, "/api/irq/enable")      => api_irq_enable(resp),
         (Method::Post, "/api/reboot")          => api_reboot(resp, ctx),
         _                                      => resp.not_found(),
     }
@@ -248,8 +249,9 @@ a{{color:#7a9af0;text-decoration:none}}\
 <tr><td>RX overflow</td><td>{}</td></tr>\
 <tr><td>CRC errors</td><td>{}</td></tr>\
 <tr><td>Preamble errors</td><td>{}</td></tr>\
+<tr><td>Ring overflow</td><td>{}</td></tr>\
 </table></div>",
-        ctx.mac_overflow, ctx.mac_crc_err, ctx.mac_preamble_err).ok();
+        ctx.mac_overflow, ctx.mac_crc_err, ctx.mac_preamble_err, ctx.ring_overflow).ok();
     // Panels card
     write!(resp, "<div class=c><h2>Panels</h2><table>").ok();
     for (i, chain_slots) in l.assignments.iter().enumerate() {
@@ -485,14 +487,60 @@ fn api_bitmap_stats(resp: &mut HttpResponse, ctx: &Context) {
     write!(resp, r#""last_chunk":"{}/{}","last_size":"{}x{}","last_data_len":{},"#,
         s.last_chunk_index, s.last_total_chunks,
         s.last_width, s.last_height, s.last_data_len).ok();
-    write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{}}}"#,
-        ctx.mac_overflow, ctx.mac_crc_err, ctx.mac_preamble_err).ok();
+    write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{},"ring_overflow":{},"isr_count":{},"mtvec":"0x{:08x}","trap_addr":"0x{:08x}"}}"#,
+        ctx.mac_overflow, ctx.mac_crc_err, ctx.mac_preamble_err, ctx.ring_overflow,
+        crate::ethernet::isr_count(), crate::ethernet::debug_mtvec(), crate::ethernet::trap_addr()).ok();
 }
 
 fn api_reboot(resp: &mut HttpResponse, ctx: &mut Context) {
     ctx.reboot_pending = true;
     resp.ok_json();
     write!(resp, r#"{{"ok":true,"rebooting":true}}"#).ok();
+}
+
+fn api_irq_enable(resp: &mut HttpResponse) {
+    // Enable ETHMAC interrupt for debugging
+
+    // First, clear any pending packets to ensure clean state
+    crate::ethernet::poll_rx_to_ring();
+
+    // 1. Enable ETHMAC peripheral interrupt (event manager)
+    // This clears pending first, then enables
+    crate::ethernet::enable_rx_interrupt();
+
+    // 2. Set VexRiscv IRQ_MASK bit 2 (ETHMAC is IRQ #2)
+    unsafe {
+        let irq_mask: u32 = 1 << 2;
+        core::arch::asm!("csrw 0xBC0, {}", in(reg) irq_mask);
+    }
+
+    // 3. Enable machine external interrupts and global interrupt enable
+    unsafe {
+        riscv::register::mie::set_mext();
+        riscv::register::mstatus::set_mie();
+    }
+
+    // Read back CSRs for debugging
+    let mstatus: u32;
+    let mie: u32;
+    let irq_mask: u32;
+    let irq_pending: u32;
+    unsafe {
+        core::arch::asm!("csrr {}, mstatus", out(reg) mstatus);
+        core::arch::asm!("csrr {}, mie", out(reg) mie);
+        core::arch::asm!("csrr {}, 0xBC0", out(reg) irq_mask);  // IRQ_MASK
+        core::arch::asm!("csrr {}, 0xFC0", out(reg) irq_pending);  // IRQ_PENDING
+    }
+
+    // Read MAC event registers
+    let ethmac = unsafe { &*litex_pac::Ethmac::ptr() };
+    let ev_status = ethmac.sram_writer_ev_status().read().bits();
+    let ev_pending = ethmac.sram_writer_ev_pending().read().bits();
+    let ev_enable = ethmac.sram_writer_ev_enable().read().bits();
+
+    resp.ok_json();
+    write!(resp, r#"{{"ok":true,"mstatus":"0x{:08x}","mie":"0x{:08x}","irq_mask":"0x{:08x}","irq_pending":"0x{:08x}","ev_status":{},"ev_pending":{},"ev_enable":{}}}"#,
+        mstatus, mie, irq_mask, irq_pending, ev_status, ev_pending, ev_enable).ok();
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

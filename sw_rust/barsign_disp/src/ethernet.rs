@@ -2,6 +2,7 @@
 // Apache 2.0/MIT by DerFetzer
 use litex_pac::{Ethmac, Ethmem};
 
+use core::sync::atomic::{AtomicUsize, Ordering};
 use smoltcp::phy::{self, DeviceCapabilities};
 use smoltcp::time::Instant;
 use smoltcp::{Error, Result};
@@ -13,6 +14,51 @@ use smoltcp::{Error, Result};
 // We compute addresses directly from the base.
 const SLOT_SIZE: usize = 2048;
 const NRXSLOTS: usize = 8;
+
+// ============================================================================
+// Ring buffer for ISR-captured packets
+// ============================================================================
+const RX_RING_SIZE: usize = 32;  // 32 slots (vs 8 in hardware)
+const RX_SLOT_SIZE: usize = 2048;
+
+static mut RX_RING: [[u8; RX_SLOT_SIZE]; RX_RING_SIZE] = [[0; RX_SLOT_SIZE]; RX_RING_SIZE];
+static mut RX_RING_LEN: [usize; RX_RING_SIZE] = [0; RX_RING_SIZE];
+static RX_WRITE_IDX: AtomicUsize = AtomicUsize::new(0);
+static RX_READ_IDX: AtomicUsize = AtomicUsize::new(0);
+
+// Counter for ring buffer overflows (ISR couldn't store packet)
+// Using a plain static since this is only written from ISR context
+static mut RX_RING_OVERFLOW: usize = 0;
+
+// Counter for ISR invocations (for debugging)
+static mut ISR_COUNT: usize = 0;
+
+// Flag to track if interrupts have been explicitly enabled
+static mut INTERRUPTS_ENABLED: bool = false;
+
+// Debug: mtvec value
+static mut DEBUG_MTVEC: usize = 0;
+// Debug: trap handler address we tried to write
+static mut DEBUG_TRAP_ADDR: usize = 0;
+
+pub fn set_debug_mtvec(val: usize) {
+    unsafe { DEBUG_MTVEC = val; }
+}
+
+pub fn debug_mtvec() -> usize {
+    unsafe { DEBUG_MTVEC }
+}
+
+pub fn set_trap_addr(val: usize) {
+    unsafe { DEBUG_TRAP_ADDR = val; }
+}
+
+pub fn trap_addr() -> usize {
+    unsafe { DEBUG_TRAP_ADDR }
+}
+
+// Base address of ETHMEM (RX buffers start here)
+const ETHMEM_BASE: usize = 0x8000_0000;
 
 pub struct Eth {
     ethmac: Ethmac,
@@ -169,4 +215,146 @@ impl<'a> phy::TxToken for EthTxToken<'a> {
         }
         result
     }
+}
+
+// ============================================================================
+// Interrupt-driven packet reception
+// ============================================================================
+
+/// Poll hardware FIFO and copy packets to ring buffer.
+/// Call this frequently from the main loop to drain packets before hardware FIFO overflows.
+/// Returns the number of packets transferred.
+#[no_mangle]
+pub extern "C" fn poll_rx_to_ring() -> usize {
+    let ethmac = unsafe { &*litex_pac::Ethmac::ptr() };
+    let mut count = 0;
+
+    // Drain all pending packets from hardware FIFO
+    while ethmac.sram_writer_ev_pending().read().bits() != 0 {
+        let slot = ethmac.sram_writer_slot().read().bits() as usize;
+        let len = ethmac.sram_writer_length().read().bits() as usize;
+
+        // Clamp length to slot size
+        let len = len.min(RX_SLOT_SIZE);
+
+        // Get write index
+        let write_idx = RX_WRITE_IDX.load(Ordering::Relaxed);
+        let next_idx = (write_idx + 1) % RX_RING_SIZE;
+
+        // Check for overflow (ring full)
+        if next_idx != RX_READ_IDX.load(Ordering::Acquire) {
+            // Copy packet from hardware FIFO to ring buffer
+            let src = (ETHMEM_BASE + slot * SLOT_SIZE) as *const u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(src, RX_RING[write_idx].as_mut_ptr(), len);
+                RX_RING_LEN[write_idx] = len;
+            }
+            RX_WRITE_IDX.store(next_idx, Ordering::Release);
+            count += 1;
+        } else {
+            // Ring buffer full - count the overflow
+            unsafe { RX_RING_OVERFLOW += 1; }
+        }
+
+        // Acknowledge packet (clears pending, advances hardware slot)
+        ethmac.sram_writer_ev_pending().write(|w| unsafe { w.bits(1) });
+    }
+    count
+}
+
+/// ETHMAC interrupt handler - called when packets arrive.
+#[no_mangle]
+pub extern "C" fn ethmac() {
+    unsafe { ISR_COUNT += 1; }
+    poll_rx_to_ring();
+}
+
+/// Get ISR invocation count (for debugging) - reads from 0x40020000
+pub fn isr_count() -> usize {
+    unsafe { core::ptr::read_volatile(0x40020000 as *const u32) as usize }
+}
+
+/// Increment ISR count (called from trap handler)
+pub fn increment_isr_count() {
+    unsafe { ISR_COUNT += 1; }
+}
+
+/// Pop a packet from the ring buffer.
+/// Returns a reference to the packet data, or None if the ring is empty.
+/// The returned slice is valid until the next call to ring_pop().
+pub fn ring_pop() -> Option<&'static [u8]> {
+    let read_idx = RX_READ_IDX.load(Ordering::Acquire);
+    let write_idx = RX_WRITE_IDX.load(Ordering::Acquire);
+
+    if read_idx == write_idx {
+        return None;  // Empty
+    }
+
+    let len = unsafe { RX_RING_LEN[read_idx] };
+    let data = unsafe { &RX_RING[read_idx][..len] };
+
+    RX_READ_IDX.store((read_idx + 1) % RX_RING_SIZE, Ordering::Release);
+    Some(data)
+}
+
+/// Check if the ring buffer has packets available without consuming them.
+pub fn ring_has_packets() -> bool {
+    let read_idx = RX_READ_IDX.load(Ordering::Acquire);
+    let write_idx = RX_WRITE_IDX.load(Ordering::Acquire);
+    read_idx != write_idx
+}
+
+/// Get the number of ring buffer overflow events (packets lost because ring was full).
+pub fn ring_overflow_count() -> usize {
+    unsafe { RX_RING_OVERFLOW }
+}
+
+/// Enable ETHMAC RX interrupt at the peripheral level.
+/// Must also enable CPU interrupts for this to work.
+pub fn enable_rx_interrupt() {
+    let ethmac = unsafe { &*litex_pac::Ethmac::ptr() };
+    // Clear any pending interrupt first
+    ethmac.sram_writer_ev_pending().write(|w| unsafe { w.bits(1) });
+    // Enable the "available" event interrupt
+    ethmac.sram_writer_ev_enable().write(|w| w.available().set_bit());
+    // Set flag so check_and_reenable_interrupt knows interrupts are in use
+    unsafe { INTERRUPTS_ENABLED = true; }
+}
+
+/// Disable ETHMAC RX interrupt.
+pub fn disable_rx_interrupt() {
+    let ethmac = unsafe { &*litex_pac::Ethmac::ptr() };
+    ethmac.sram_writer_ev_enable().write(|w| w.available().clear_bit());
+}
+
+/// Check if the ISR fired (ev_enable was cleared by ISR).
+/// If so, and if MAC is idle (ev_status=0), re-enable the interrupt.
+/// Returns true if interrupt was re-enabled.
+/// Only does anything if interrupts have been explicitly enabled.
+pub fn check_and_reenable_interrupt() -> bool {
+    // Only check if interrupts have been enabled
+    if unsafe { !INTERRUPTS_ENABLED } {
+        return false;
+    }
+
+    let ethmac = unsafe { &*litex_pac::Ethmac::ptr() };
+
+    // Check if ev_enable is 0 (ISR disabled it)
+    if ethmac.sram_writer_ev_enable().read().bits() == 0 {
+        // Only re-enable if no packet is waiting (ev_status=0)
+        // Otherwise the interrupt would fire immediately causing rapid oscillation
+        if ethmac.sram_writer_ev_status().read().bits() == 0 {
+            // Clear pending and re-enable
+            ethmac.sram_writer_ev_pending().write(|w| unsafe { w.bits(1) });
+            ethmac.sram_writer_ev_enable().write(|w| w.available().set_bit());
+            return true;
+        }
+        // Packet waiting - don't re-enable yet, let main loop drain it
+    }
+    false
+}
+
+/// Read the debug trap counter at 0x40020000 (written by assembly trap handler)
+pub fn debug_trap_count() -> u32 {
+    unsafe { core::ptr::read_volatile(0x40020000 as *const u32) }
 }

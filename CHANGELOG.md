@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-02-08
+
+### Changed
+- **CPU variant changed to "lite"** — VexRiscv "minimal" variant doesn't support external interrupts. Changed to "lite" which enables full interrupt/CSR support (~25% larger CPU).
+- **Experimental interrupt support** — Added trap handler and interrupt enable infrastructure for ETHMAC. Interrupts fire correctly but calling Rust code from ISR crashes, limiting usefulness to wake-up signal only. Enable via `POST /api/irq/enable`.
+
+### Added
+- **Debug endpoint `/api/irq/enable`** — Returns CSR state (mstatus, mie, irq_mask, irq_pending) and MAC event registers for interrupt debugging.
+- **Ring buffer infrastructure** — 32-slot ring buffer in `ethernet.rs` for future ISR packet draining (currently unused due to ISR crash issue).
+
+### Technical Notes
+- mtvec is WRITE_ONLY in VexRiscv (reads return 0, writes work)
+- LiteX EventManager is level-triggered; must check ev_status before re-enabling
+- See NOTES.md for detailed interrupt investigation findings
+
+---
+
+## [1.9.1] - 2026-02-08
+
+### Fixed
+- **Test pattern timing** — Fixed timing issues in test pattern generation.
+- **Include prebuilt bitstreams** — Added 128x64.bit and 256x64.bit to bitstreams/ directory.
+
+---
+
 ## [1.9.0] - 2026-02-08
 
 ### Changed
