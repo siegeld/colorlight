@@ -105,6 +105,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "pattern",
+        nargs="?",
         choices=list(PATTERNS.keys()),
         help="Pattern to generate",
     )
@@ -113,8 +114,28 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=128)
     parser.add_argument("--height", type=int, default=64)
     parser.add_argument("--delay", type=float, default=0.01, help="Delay between packets in seconds")
+    parser.add_argument("--smoke", action="store_true", help="Cycle through all patterns")
+    parser.add_argument("--smoke-delay", type=float, default=1.0, help="Delay between patterns in smoke mode (seconds)")
+    parser.add_argument("--smoke-loops", type=int, default=0, help="Number of loops in smoke mode (0=forever)")
     args = parser.parse_args()
 
-    rgb_data = PATTERNS[args.pattern](args.width, args.height)
-    send_rgb_data(args.host, args.port, rgb_data, args.width, args.height, delay=args.delay)
-    print(f"Sent '{args.pattern}' pattern ({args.width}x{args.height})")
+    if args.smoke:
+        pattern_names = list(PATTERNS.keys())
+        loop_count = 0
+        try:
+            while args.smoke_loops == 0 or loop_count < args.smoke_loops:
+                for name in pattern_names:
+                    timestamp = time.strftime("%H:%M:%S")
+                    print(f"[{timestamp}] {name}")
+                    rgb_data = PATTERNS[name](args.width, args.height)
+                    send_rgb_data(args.host, args.port, rgb_data, args.width, args.height, delay=args.delay)
+                    time.sleep(args.smoke_delay)
+                loop_count += 1
+        except KeyboardInterrupt:
+            print("\nStopped.")
+    else:
+        if not args.pattern:
+            parser.error("pattern is required unless --smoke is specified")
+        rgb_data = PATTERNS[args.pattern](args.width, args.height)
+        send_rgb_data(args.host, args.port, rgb_data, args.width, args.height, delay=args.delay)
+        print(f"Sent '{args.pattern}' pattern ({args.width}x{args.height})")

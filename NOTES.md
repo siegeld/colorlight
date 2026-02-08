@@ -4,7 +4,23 @@
 
 ## 2026-02-08
 
-### Entry: Post-CDC Revert Analysis
+### 10:53 - Test Pattern Delay Requirement
+
+`--delay 0.002` (2ms) works - same pacing as video streaming. This matches the auto-calculated delay in `send_youtube.py`:
+```
+chunk_delay = 0.9 / fps / total_chunks  # ≈1.8ms for 15fps, 34 chunks
+```
+
+With `--delay 0` all 34 packets arrive instantly → MAC FIFO overflow (8 slots).
+With `--delay 0.1` too slow for streaming mode detection (200ms timeout).
+
+Test command: `python3 tools/send_test_pattern.py --smoke --host 10.11.6.72 --width 256 --height 64 --delay 0.002`
+
+Note: May need to send twice occasionally - timing-sensitive.
+
+---
+
+### 09:30 - Post-CDC Revert Analysis
 
 Reverted dual clock domain CDC implementation back to v1.9.0 (40MHz baseline). The CDC approach caused display banding.
 
