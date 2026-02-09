@@ -399,6 +399,7 @@ build_all() {
     fi
 
     build_bitstream
+    build_pac       # Always regenerate PAC after bitstream to avoid register mismatch
     build_firmware
 
     print_success "All builds completed successfully"
@@ -422,7 +423,7 @@ TARGETS:
     boot            Combined: program SRAM + ensure TFTP server
     start           Start TFTP server (if not already running)
     stop            Stop the background TFTP server
-    all             Build docker (if needed), bitstream, and firmware
+    all             Build docker (if needed), bitstream, PAC, and firmware
 
     If no target is specified, 'all' is assumed.
 
