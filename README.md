@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.10.2-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.10.5-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -56,28 +56,130 @@ Connect these to your USB Blaster or FTDI programmer's corresponding JTAG signal
 
 All builds use Docker for reproducibility. Run `./build.sh --help` for full options.
 
+#### First Time Setup
+
 ```bash
-# First time: build Docker environment
+# Build the Docker environment (only needed once)
 ./build.sh docker
 
-# Build bitstream + firmware for default panel (128x64)
+# Build everything: bitstream + firmware for default panel (128x64)
 ./build.sh
+```
 
-# Build bitstreams for ALL panel sizes at once
-./build.sh build-all
+#### Common Workflows
 
-# Build for a specific panel
-./build.sh --panel 96x48 bitstream
+```bash
+# Development cycle - rebuild firmware and boot via TFTP
+./build.sh firmware boot
+# TFTP server auto-starts and stays running between boots
 
-# Flash and boot
-./build.sh flash                    # flash default panel
-./build.sh --panel 96x48 flash      # flash a specific panel
-./build.sh boot                     # program SRAM + TFTP boot
+# Quick test - just reboot without rebuilding (uses existing .tftp/boot.bin)
+./build.sh boot
 
-# Start TFTP server manually when needed:
-./build.sh start
+# Stop TFTP server when done developing
 ./build.sh stop
 ```
+
+#### Panel-Specific Builds
+
+Panel size is baked into the FPGA bitstream, not runtime-configurable:
+
+```bash
+# Build bitstream for a specific panel size
+./build.sh -p 256x64 bitstream      # 256x64 (two 128x64 daisy-chained)
+./build.sh -p 128x64 bitstream      # 128x64 (default)
+./build.sh -p 96x48 bitstream       # 96x48
+./build.sh -p 64x32 bitstream       # 64x32
+./build.sh -p 64x64 bitstream       # 64x64 square
+
+# Build bitstreams for ALL panel sizes at once (saved to bitstreams/)
+./build.sh build-all
+
+# Boot a specific panel (uses prebuilt bitstream from bitstreams/)
+./build.sh -p 256x64 boot
+
+# Full rebuild + boot for specific panel
+./build.sh -p 96x48 bitstream firmware boot
+```
+
+#### Flashing vs Booting
+
+```bash
+# SRAM boot (temporary - lost on power cycle, fast for development)
+./build.sh -p 128x64 boot
+
+# Flash to SPI (permanent - survives power cycles)
+./build.sh -p 128x64 flash
+
+# Flash specific panel, then boot to verify
+./build.sh -p 256x64 flash && ./build.sh -p 256x64 boot
+```
+
+#### After Gateware Changes
+
+When you modify `gateware/colorlight.py` (SoC definition), you must regenerate the PAC:
+
+```bash
+# Rebuild bitstream, regenerate PAC, then rebuild firmware
+./build.sh -p 128x64 bitstream pac firmware
+
+# Then boot to test
+./build.sh -p 128x64 boot
+```
+
+#### TFTP Server Management
+
+The TFTP server serves `boot.bin` (firmware) and `<mac>.yml` (config) files:
+
+```bash
+# Start TFTP server manually (auto-started by 'boot')
+./build.sh start
+
+# Stop TFTP server
+./build.sh stop
+
+# Check if TFTP server is running
+pgrep -f tftpy
+```
+
+#### Test Patterns
+
+The build includes a test pattern baked into the firmware:
+
+```bash
+# Build with different test patterns (shown at boot before streaming starts)
+./build.sh -t grid firmware         # Grid pattern (default)
+./build.sh -t rainbow firmware      # Rainbow gradient
+./build.sh -t solid_white firmware  # Solid white
+./build.sh -t solid_red firmware    # Solid red
+```
+
+#### Advanced Options
+
+```bash
+# Use a different JTAG cable
+./build.sh -c ft2232 flash          # FTDI FT2232
+./build.sh -c dirtyjtag flash       # DirtyJTAG
+
+# Verbose output for debugging build issues
+./build.sh -v bitstream
+
+# Specify host IP for TFTP (auto-detected by default)
+./build.sh --host-ip 10.11.6.65 boot
+```
+
+#### Quick Reference
+
+| Command | Description |
+|---------|-------------|
+| `./build.sh` | Build everything (docker if needed, bitstream, firmware) |
+| `./build.sh firmware` | Rebuild firmware only (universal binary) |
+| `./build.sh boot` | Program SRAM + start TFTP server |
+| `./build.sh flash` | Write bitstream to SPI flash (permanent) |
+| `./build.sh -p 256x64 boot` | Boot with specific panel bitstream |
+| `./build.sh bitstream pac firmware` | Full rebuild after gateware changes |
+| `./build.sh build-all` | Build bitstreams for all panel sizes |
+| `./build.sh stop` | Stop background TFTP server |
 
 ### Supported Panels
 
