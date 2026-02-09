@@ -11,6 +11,7 @@ pub mod img;
 pub mod img_flash;
 pub mod layout;
 pub mod menu;
+pub mod network;
 pub mod panic;
 pub mod patterns;
 pub mod pearson_hash;

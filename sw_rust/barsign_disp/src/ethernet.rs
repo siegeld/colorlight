@@ -262,6 +262,48 @@ pub extern "C" fn poll_rx_to_ring() -> usize {
     count
 }
 
+// Debug counter for minimal ISR test
+static mut POLL_MINIMAL_COUNT: usize = 0;
+
+/// Minimal version for ISR debugging - only read hardware registers and ack.
+/// No memory copy, no atomics. If this crashes, the issue is hardware access.
+#[no_mangle]
+pub extern "C" fn poll_rx_minimal() -> usize {
+    let ethmac = unsafe { &*litex_pac::Ethmac::ptr() };
+    let mut count = 0;
+
+    // Drain all pending packets - just read and ack
+    while ethmac.sram_writer_ev_pending().read().bits() != 0 {
+        // Read hardware registers (but don't use the values)
+        let _slot = ethmac.sram_writer_slot().read().bits();
+        let _len = ethmac.sram_writer_length().read().bits();
+
+        count += 1;
+
+        // Acknowledge packet
+        ethmac.sram_writer_ev_pending().write(|w| unsafe { w.bits(1) });
+    }
+
+    unsafe { POLL_MINIMAL_COUNT += count; }
+    count
+}
+
+/// Get minimal poll count for debugging
+pub fn poll_minimal_count() -> usize {
+    unsafe { POLL_MINIMAL_COUNT }
+}
+
+/// Drain one packet - ack via raw pointer.
+/// ev_enable should be disabled by caller before calling this.
+#[no_mangle]
+pub extern "C" fn poll_rx_one() {
+    const EV_PENDING: *mut u32 = 0xF000_1810 as *mut u32;
+    unsafe {
+        core::ptr::write_volatile(EV_PENDING, 1);
+        POLL_MINIMAL_COUNT += 1;
+    }
+}
+
 /// ETHMAC interrupt handler - called when packets arrive.
 #[no_mangle]
 pub extern "C" fn ethmac() {
@@ -327,6 +369,11 @@ pub fn disable_rx_interrupt() {
     ethmac.sram_writer_ev_enable().write(|w| w.available().clear_bit());
 }
 
+/// Check if interrupts have been enabled via enable_rx_interrupt().
+pub fn interrupts_enabled() -> bool {
+    unsafe { INTERRUPTS_ENABLED }
+}
+
 /// Check if the ISR fired (ev_enable was cleared by ISR).
 /// If so, and if MAC is idle (ev_status=0), re-enable the interrupt.
 /// Returns true if interrupt was re-enabled.
@@ -341,15 +388,10 @@ pub fn check_and_reenable_interrupt() -> bool {
 
     // Check if ev_enable is 0 (ISR disabled it)
     if ethmac.sram_writer_ev_enable().read().bits() == 0 {
-        // Only re-enable if no packet is waiting (ev_status=0)
-        // Otherwise the interrupt would fire immediately causing rapid oscillation
-        if ethmac.sram_writer_ev_status().read().bits() == 0 {
-            // Clear pending and re-enable
-            ethmac.sram_writer_ev_pending().write(|w| unsafe { w.bits(1) });
-            ethmac.sram_writer_ev_enable().write(|w| w.available().set_bit());
-            return true;
-        }
-        // Packet waiting - don't re-enable yet, let main loop drain it
+        // Re-enable without clearing pending - if packet arrived while disabled,
+        // the pending bit is still set and interrupt will fire immediately
+        ethmac.sram_writer_ev_enable().write(|w| w.available().set_bit());
+        return true;
     }
     false
 }
