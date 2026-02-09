@@ -376,7 +376,9 @@ pub extern "C" fn network_handler() {
 
         let iface = IFACE.assume_init_mut();
         let time = Instant::from_millis(TIME_MS);
-        let mut had_non_bitmap = false;
+        let mut had_arp = false;
+        let mut had_tcp = false;
+        let mut had_udp = false;
         let mut batch_count = 0u32;
 
         // Process packets in hardware FIFO (limit to prevent ISR starvation)
@@ -409,20 +411,23 @@ pub extern "C" fn network_handler() {
                     DBG_SLOW_PATH += 1;
                     batch_count += 1;
 
-                    // Count by packet type
+                    // Classify packet type and set appropriate flag
+                    // Default to ARP flag for any unclassified packet (ensures handlers run)
                     if frame.len() >= 14 {
                         let ethertype = ((frame[12] as u16) << 8) | frame[13] as u16;
                         match ethertype {
-                            0x0806 => DBG_SLOW_ARP += 1,
+                            0x0806 => { DBG_SLOW_ARP += 1; had_arp = true; }
                             0x0800 if frame.len() >= 24 => {
                                 match frame[23] {
-                                    6 => DBG_SLOW_TCP += 1,
-                                    17 => DBG_SLOW_UDP += 1,
-                                    _ => DBG_SLOW_OTHER += 1,
+                                    6 => { DBG_SLOW_TCP += 1; had_tcp = true; }
+                                    17 => { DBG_SLOW_UDP += 1; had_udp = true; }
+                                    _ => { DBG_SLOW_OTHER += 1; had_arp = true; }  // ICMP, etc.
                                 }
                             }
-                            _ => DBG_SLOW_OTHER += 1,
+                            _ => { DBG_SLOW_OTHER += 1; had_arp = true; }
                         }
+                    } else {
+                        had_arp = true;  // Ensure handlers run for any packet
                     }
 
                     // Capture first slow-path packet after streaming starts (for debugging)
@@ -433,7 +438,6 @@ pub extern "C" fn network_handler() {
                         DBG_SLOW_PKT_CAPTURED = true;
                     }
                     iface.poll(time).ok();
-                    had_non_bitmap = true;
                 }
                 None => break,
             }
@@ -444,14 +448,20 @@ pub extern "C" fn network_handler() {
             DBG_ISR_MAX_BATCH = batch_count;
         }
 
-        // Handle socket events if we had non-bitmap packets
-        if had_non_bitmap {
+        // Handle socket events
+        // TCP handlers run every ISR (cheap when idle, needed for reliable HTTP)
+        // UDP handlers only run when UDP packets arrive (optimization)
+        handle_telnet(iface);
+        handle_http(iface);
+        if had_udp {
             handle_dhcp(iface);
             handle_tftp(iface);
-            handle_telnet(iface);
             handle_artnet(iface);
             handle_bitmap_smoltcp(iface);
-            handle_http(iface);
+        }
+        // Final poll for any remaining work
+        let had_slow_path = had_arp || had_tcp || had_udp;
+        if had_slow_path {
             iface.poll(time).ok();
         }
 

@@ -4,6 +4,42 @@
 
 ## 2026-02-09
 
+### Selective Handler Dispatch (v1.10.4)
+
+**Problem:** After v1.10.3 fixes, still seeing 3.5% frame drops during streaming. Debug counters showed:
+- `slow_path: 279` (arp:254 tcp:22 udp:2 other:1)
+- `frames_dropped: 763` out of 20,883
+
+**Root cause:** When ANY slow-path packet (e.g., ARP) arrived, ALL 6 socket handlers ran inside ISR:
+```rust
+if had_non_bitmap {
+    handle_dhcp(iface);      // UDP
+    handle_tftp(iface);      // UDP
+    handle_telnet(iface);    // TCP
+    handle_artnet(iface);    // UDP
+    handle_bitmap_smoltcp(iface);  // UDP
+    handle_http(iface);      // TCP
+}
+```
+
+A single ARP packet (most common slow-path traffic) triggered 6 handler calls, most doing nothing.
+
+**Fix implemented:**
+1. Track packet type with `had_arp`, `had_tcp`, `had_udp` flags
+2. TCP handlers (telnet, http) run every ISR — cheap when idle, needed for reliable HTTP
+3. UDP handlers only run when `had_udp` is true — main optimization
+
+**Results:**
+| Metric | Before | After |
+|--------|--------|-------|
+| frames_dropped | 763 (3.5%) | 12 (0.85%) |
+| mac_overflow | 6,598 (growing) | ~1,034 (stable) |
+| HTTP reliability | intermittent | fast & reliable |
+
+**Key insight:** ARP packets (254 of 279 slow-path) now trigger 0 UDP handler calls instead of 4, reducing ISR time by ~50% for the most common slow-path traffic.
+
+---
+
 ### MAC Overflow Fix (v1.10.3)
 
 **Problem:** Video streaming showed jitter and frame drops despite ISR-driven architecture. Debug counters revealed:
