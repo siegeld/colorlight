@@ -4,6 +4,29 @@
 
 ## 2026-02-09
 
+### HTTP Connection Close Fix (v1.10.5)
+
+**Problem:** Chrome tab spinner never stopped after loading HTTP page. Connection stayed open.
+
+**Root cause:** After `socket.close()`, smoltcp needs `iface.poll()` to send the TCP FIN packet. But poll() was only called when slow-path packets arrived. During streaming, slow-path packets are rare, so FIN was never sent.
+
+**Bad fix attempted:** Always call `iface.poll()` every ISR — killed performance (back to 3.5% drops).
+
+**Correct fix:** `handle_http()` now returns `bool` indicating if it closed a socket. Only call `iface.poll()` when:
+- Slow-path packet arrived (as before), OR
+- HTTP just closed a socket (needs to send FIN)
+
+```rust
+let http_needs_poll = handle_http(iface);
+if had_slow_path || http_needs_poll {
+    iface.poll(time).ok();
+}
+```
+
+**Result:** Chrome spinner stops, drop rate stays at 0.79%.
+
+---
+
 ### Selective Handler Dispatch (v1.10.4)
 
 **Problem:** After v1.10.3 fixes, still seeing 3.5% frame drops during streaming. Debug counters showed:

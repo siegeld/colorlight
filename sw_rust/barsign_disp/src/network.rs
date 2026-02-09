@@ -452,16 +452,16 @@ pub extern "C" fn network_handler() {
         // TCP handlers run every ISR (cheap when idle, needed for reliable HTTP)
         // UDP handlers only run when UDP packets arrive (optimization)
         handle_telnet(iface);
-        handle_http(iface);
+        let http_needs_poll = handle_http(iface);
         if had_udp {
             handle_dhcp(iface);
             handle_tftp(iface);
             handle_artnet(iface);
             handle_bitmap_smoltcp(iface);
         }
-        // Final poll for any remaining work
+        // Poll if slow-path packet or HTTP needs to send FIN
         let had_slow_path = had_arp || had_tcp || had_udp;
-        if had_slow_path {
+        if had_slow_path || http_needs_poll {
             iface.poll(time).ok();
         }
 
@@ -641,8 +641,8 @@ unsafe fn handle_bitmap_smoltcp(iface: &mut Interface<'static, Eth>) {
     }
 }
 
-/// Handle HTTP (TCP port 80).
-unsafe fn handle_http(iface: &mut Interface<'static, Eth>) {
+/// Handle HTTP (TCP port 80). Returns true if poll() needed (socket closed).
+unsafe fn handle_http(iface: &mut Interface<'static, Eth>) -> bool {
     let http_handles = [
         *HTTP_HANDLE_A.assume_init_ref(),
         *HTTP_HANDLE_B.assume_init_ref(),
@@ -653,6 +653,7 @@ unsafe fn handle_http(iface: &mut Interface<'static, Eth>) {
         _ => [0u8; 4],
     };
 
+    let mut needs_poll = false;
     for i in 0..2 {
         let socket = iface.get_socket::<TcpSocket>(http_handles[i]);
         let request = HTTP_REQUESTS[i].assume_init_mut();
@@ -723,9 +724,11 @@ unsafe fn handle_http(iface: &mut Interface<'static, Eth>) {
             if HTTP_RESPONSE_SENT[i] >= response.data.len() && response.data.len() > 0 {
                 socket.close();
                 HTTP_CLOSE_AT[i] = TIME_MS + 50;
+                needs_poll = true;  // Need poll to send FIN
             }
         }
     }
+    needs_poll
 }
 
 /// Handle HTTP request in ISR context.
