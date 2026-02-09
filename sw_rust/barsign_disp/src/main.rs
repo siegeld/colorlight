@@ -241,14 +241,16 @@ fn main() -> ! {
     }
     writeln!(r.context.output.serial, "Interrupts enabled").ok();
 
-    let mut time_ms: i64 = 0;
+    let mut last_time_ms: i64 = 0;
 
-    // Configure timer0 for periodic 1ms ticks (non-blocking)
+    // Configure timer0 for 1-second period
+    // We read the countdown value to get millisecond precision
+    // ev_pending only fires once per second (to track seconds)
     unsafe {
         let t = &*pac::Timer0::ptr();
         t.en().write(|w| w.bits(0));
-        t.reload().write(|w| w.bits(40_000 - 1));  // 40MHz / 1000 = 40000 cycles per ms
-        t.load().write(|w| w.bits(40_000 - 1));
+        t.reload().write(|w| w.bits(40_000_000 - 1));  // 40MHz = 40M cycles per second
+        t.load().write(|w| w.bits(40_000_000 - 1));
         t.en().write(|w| w.bits(1));
         t.ev_pending().write(|w| w.bits(1));        // clear any pending event
     }
@@ -256,22 +258,14 @@ fn main() -> ! {
     // ========================================================================
     // MAIN LOOP - ZERO NETWORK CODE
     // All network processing happens in ISR via network_handler()
+    // Timer ticks are drained by ISR to maintain accurate TIME_MS
     // ========================================================================
     loop {
-        // Non-blocking 1ms tick: check if timer fired
-        let timer_fired = unsafe {
-            let t = &*pac::Timer0::ptr();
-            if t.ev_pending().read().bits() != 0 {
-                t.ev_pending().write(|w| w.bits(1));  // clear
-                true
-            } else {
-                false
-            }
-        };
-        if timer_fired {
-            time_ms += 1;
-            // Update network module's time
-            network::update_time_ms(time_ms);
+        // Get time (updated by ISR draining timer ticks)
+        let time_ms = network::get_time_ms();
+        let timer_tick = time_ms != last_time_ms;
+        if timer_tick {
+            last_time_ms = time_ms;
         }
 
         // Check if ISR fired and re-enable when idle
@@ -279,7 +273,7 @@ fn main() -> ! {
 
         // Skip processing on non-timer ticks or when streaming
         let streaming = network::is_streaming();
-        if !timer_fired || (time_ms % 5 != 0) {
+        if !timer_tick || (time_ms % 5 != 0) {
             continue;
         }
 

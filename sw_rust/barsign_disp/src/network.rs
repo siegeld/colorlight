@@ -102,6 +102,46 @@ static mut IAC_STATE: u8 = 0;
 static mut TIME_MS: i64 = 0;
 static mut LAST_BITMAP_PACKET_MS: i64 = 0;
 
+// ============================================================================
+// Timer-based accurate timing
+// ============================================================================
+// Timer0 configured as free-running 1-second counter.
+// We track seconds from ev_pending ticks, and read countdown value for sub-second.
+
+/// Seconds counter - incremented each time timer wraps (every 1 second)
+static mut TIMER_SECONDS: i64 = 0;
+
+/// Timer reload value (1 second at 40MHz)
+const TIMER_RELOAD: u32 = 40_000_000;
+
+/// Cycles per millisecond
+const CYCLES_PER_MS: u32 = 40_000;
+
+/// Update timer seconds counter and compute current time in ms.
+/// Called from ISR to ensure second boundaries aren't missed.
+#[inline]
+fn update_time_from_timer() {
+    unsafe {
+        let t = &*pac::Timer0::ptr();
+        // Count seconds from ev_pending (1 second period)
+        while t.ev_pending().read().bits() != 0 {
+            t.ev_pending().write(|w| w.bits(1)); // clear
+            TIMER_SECONDS += 1;
+        }
+        // Update TIME_MS from seconds + current countdown position
+        t.update_value().write(|w| w.bits(1)); // latch current value
+        let countdown = t.value().read().bits();
+        let elapsed_in_period = (TIMER_RELOAD - 1 - countdown) / CYCLES_PER_MS;
+        TIME_MS = TIMER_SECONDS * 1000 + elapsed_in_period as i64;
+    }
+}
+
+/// Get current time in milliseconds.
+#[inline]
+pub fn get_time_ms() -> i64 {
+    unsafe { TIME_MS }
+}
+
 // DHCP configuration storage
 static mut DHCP_CONFIGURED: bool = false;
 static mut BOOT_SERVER: Option<([u8; 4], crate::menu::BootServerSource)> = None;
@@ -307,6 +347,10 @@ pub extern "C" fn network_handler() {
         if !IFACE_INITIALIZED {
             return;
         }
+
+        // Update TIME_MS by draining timer ticks
+        // This ensures no ticks are lost even when main loop is starved
+        update_time_from_timer();
 
         let iface = IFACE.assume_init_mut();
         let time = Instant::from_millis(TIME_MS);
@@ -920,8 +964,8 @@ unsafe fn api_bitmap_stats(resp: &mut HttpResponse) {
         stats.last_width, stats.last_height, stats.last_data_len).ok();
     write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{},"ring_overflow":{},"#,
         mac_ovf, mac_crc, mac_pre, ring_ovf).ok();
-    write!(resp, r#""isr_count":{},"mtvec":"0x{:08x}","trap_addr":"0x{:08x}"}}"#,
-        crate::ethernet::isr_count(), crate::ethernet::debug_mtvec(), crate::ethernet::trap_addr()).ok();
+    write!(resp, r#""isr_count":{},"mtvec":"0x{:08x}","trap_addr":"0x{:08x}","time_ms":{}}}"#,
+        crate::ethernet::isr_count(), crate::ethernet::debug_mtvec(), crate::ethernet::trap_addr(), TIME_MS).ok();
 }
 
 unsafe fn api_display_on(resp: &mut HttpResponse) {
