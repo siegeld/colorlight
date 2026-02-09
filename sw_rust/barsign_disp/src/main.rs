@@ -189,6 +189,9 @@ fn main() -> ! {
     let (x0, y0, r0) = hub75.get_panel_param(0, 0);
     writeln!(output.serial, "Panel config set: p0_0=({},{},{})", x0, y0, r0).ok();
 
+    // Read default panel size from bitstream CSRs (before hub75 is moved)
+    let (hw_cols, hw_rows, _, _, _) = hub75.get_hw_info();
+
     let context = menu::Context {
         mac: mac_bytes,
         output,
@@ -198,7 +201,7 @@ fn main() -> ! {
         quit: false,
         debug: false,
         bitmap_stats: bitmap_udp::BitmapStats::new(),
-        layout: LayoutConfig::single_panel(96, 48),
+        layout: LayoutConfig::single_panel(hw_cols, hw_rows),
         reboot_pending: false,
         boot_server: None,
         mac_overflow: 0,

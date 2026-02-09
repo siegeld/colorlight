@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.10.5-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.10.6-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -382,7 +382,63 @@ There are two ways to drive multiple panels per HUB75 output:
 
 **Chaining is the recommended approach** for multi-panel setups. It uses the same BRAM budget, supports flexible grid layouts via TFTP config, and scales to 12 panels (6 outputs × 2 chains).
 
+## Bitstream vs Layout
+
+The bitstream and the layout config control different things:
+
+| Layer | Set by | Controls | Can change at runtime? |
+|-------|--------|----------|----------------------|
+| **Bitstream** | `--panel` flag at build | Max pixel width, scan rate, shift timing | No — requires reflash |
+| **Layout** | TFTP YAML config | Panel grid, connector mapping, positioning | Yes — applied at boot or via API |
+
+The bitstream defines the **hard ceiling**: the HUB75 shift registers are
+wired for exactly N columns and M rows. The layout maps logical panels
+onto that framebuffer — it can use less than the full resolution, but
+never more.
+
+### Example: Two 128x64 panels on J1
+
+**Bitstream:** `./build.sh bitstream` — default 128x64 panel with chain_length=2. Hardware shifts two 128-pixel blocks per output.
+
+**Layout (YAML):**
+```yaml
+grid: 2x1
+panel_width: 128
+panel_height: 64
+J1: 0,0 1,0
+```
+Result: 128x64 panel at grid(0,0) + 128x64 panel at grid(1,0) = 256x64 virtual display.
+Gateware reads two 128-pixel blocks at independent (x,y) offsets via panel CSRs.
+
+### Example: Six independent 128x64 panels (3x2 grid)
+
+**Bitstream:** `./build.sh -p 128x64 bitstream` (default chain_length=2, but only one panel per output used here)
+
+**Layout:**
+```yaml
+grid: 3x2
+panel_width: 128
+panel_height: 64
+J1: 0,0
+J2: 1,0
+J3: 2,0
+J4: 0,1
+J5: 1,1
+J6: 2,1
+```
+Result: 384x128 virtual display across 6 outputs.
+
+### What happens if layout exceeds bitstream?
+
+If the layout's virtual size exceeds the bitstream resolution, the DMA
+reads past row boundaries and the display shows garbage. The web GUI
+shows both values so you can verify they match.
+
 ## Configuration
+
+The system is configured at three levels. The **bitstream** (FPGA) defines the maximum panel size and HUB75 timing — this is fixed at build time. **Firmware constants** must match the bitstream. The **TFTP YAML config** maps physical panels to a virtual display grid — this is loaded at boot and can be changed without rebuilding.
+
+For the default setup (two 128x64 panels on J1 forming a 256x64 display), no build flags are needed — just `./build.sh` and a YAML config file in `.tftp/`.
 
 ### HUB75 Output Count & Chain Length
 
@@ -458,13 +514,14 @@ telnet <board-ip> 23
 
 ## Boot Workflow
 
-1. **Power on** — BIOS loads bitstream from SPI flash
-2. **BIOS TFTP** — BIOS fetches `boot.bin` from the TFTP server (see note below)
-3. **Firmware starts** — DHCP acquires IP and unique MAC from flash UID
-4. **Config fetch** — Firmware fetches `<mac>.yml` from the TFTP server (see note below)
-5. **Layout applied** — Panel grid configured and display redrawn
+1. **Power on** — BIOS loads bitstream from SPI flash (or SRAM if loaded via `./build.sh boot`)
+2. **BIOS TFTP** — BIOS fetches `boot.bin` (firmware) from the TFTP server on port 6969
+3. **Firmware starts** — Reads SPI flash unique ID, derives unique MAC (`02:xx:xx:xx:xx:xx`), displays default test pattern
+4. **DHCP** — Acquires IP address; falls back to `10.11.6.250/24` after 10 seconds
+5. **TFTP config** — Firmware fetches `<mac>.yml` from the TFTP server (DHCP Option 66 address, or fallback `10.11.6.65`) on port 6969
+6. **Layout applied** — Panel grid configured from YAML, display redrawn at virtual resolution
 
-The bitstream is flashed permanently to SPI (`./build.sh flash`). Firmware is loaded via TFTP on each boot. The TFTP server is started automatically by `./build.sh boot` and stays running in the background. Use `./build.sh start` / `./build.sh stop` to manage it manually.
+The TFTP server (`./build.sh start` or auto-started by `boot`) serves both the firmware binary and per-board YAML configs from the `.tftp/` directory. Use `./build.sh stop` to stop it.
 
 ### TFTP Server IP
 

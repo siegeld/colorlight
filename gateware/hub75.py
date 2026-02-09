@@ -4,7 +4,7 @@
 from types import SimpleNamespace
 
 from migen import If, Signal, Array, Memory, Module, FSM, NextValue, NextState, Mux, Cat, Case
-from litex.soc.interconnect.csr import AutoCSR, CSRStorage, CSRField
+from litex.soc.interconnect.csr import AutoCSR, CSRStorage, CSRStatus, CSRField
 from litedram.frontend.dma import LiteDRAMDMAReader
 
 sdram_offset = 0x00400000//2//4
@@ -36,6 +36,15 @@ class Hub75(Module, AutoCSR):
         self.fb_base = CSRStorage(fields=[
             CSRField("offset", description="Framebuffer base address in 32-bit words", size=20),
         ], reset=sdram_offset)
+        # Read-only registers exposing compile-time bitstream parameters
+        self.hw_columns = CSRStatus(16, reset=columns,
+            description="Bitstream pixel columns (read-only)")
+        self.hw_rows = CSRStatus(16, reset=rows,
+            description="Bitstream pixel rows (read-only)")
+        # hw_config packs: scan (bits 0-7), chain_length_2 (bits 8-11), n_outputs (bits 12-15)
+        hw_config_val = (scan & 0xFF) | ((chain_length_2 & 0xF) << 8) | ((n_outputs & 0xF) << 12)
+        self.hw_config = CSRStatus(16, reset=hw_config_val,
+            description="Bitstream config: scan[7:0], chain_length_2[11:8], n_outputs[15:12]")
         panel_config = Array()
         for panel_output in range(n_outputs):
             for chain_pos in range(1 << chain_length_2):

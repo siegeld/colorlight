@@ -161,6 +161,18 @@ impl Hub75 {
         }
     }
 
+    /// Read bitstream hardware parameters from CSRStatus registers.
+    /// Returns (columns, rows, scan, chain_length_2, n_outputs).
+    pub fn get_hw_info(&self) -> (u16, u16, u8, u8, u8) {
+        let columns = self.hub75.hw_columns().read().bits() as u16;
+        let rows = self.hub75.hw_rows().read().bits() as u16;
+        let config = self.hub75.hw_config().read().bits() as u16;
+        let scan = (config & 0xFF) as u8;
+        let chain_length_2 = ((config >> 8) & 0xF) as u8;
+        let n_outputs = ((config >> 12) & 0xF) as u8;
+        (columns, rows, scan, chain_length_2, n_outputs)
+    }
+
     pub fn get_palette(&mut self) -> &'_ [u32] {
         const LENGTH: usize = 256;
         use pac::hub75_palette::Hub75Palette;

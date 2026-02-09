@@ -60,8 +60,8 @@ import hub75
 import helper
 
 # Panel configurations: columns, rows, scan rate (rows per address cycle)
-# "256x64" is two daisy-chained 128x64 panels treated as one wide panel
-# (workaround for chain_length_2>0 gateware bug — use columns=256 with chain_length_2=0)
+# "256x64" treats two daisy-chained 128x64 panels as a single wide panel
+# (alternative to chaining — uses columns=256 with chain_length_2=0, no independent positioning)
 PANELS = {
     "256x64": {"columns": 256, "rows": 64, "scan": 32},
     "128x64": {"columns": 128, "rows": 64, "scan": 32},

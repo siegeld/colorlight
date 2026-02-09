@@ -161,7 +161,9 @@ impl TftpConfigLoader {
                                 socket.send_slice(&ack, ack_ep).ok();
 
                                 if payload_len < 512 {
-                                    socket.close();
+                                    // Don't close socket here — close() resets the TX buffer,
+                                    // which drops the ACK we just queued. Let iface.poll()
+                                    // transmit the ACK first; the caller closes after.
                                     self.state = TftpState::Done;
                                     return true;
                                 }

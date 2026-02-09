@@ -43,7 +43,8 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 |------|---------|
 | `gateware/colorlight.py` | LiteX SoC definition, peripheral instantiation |
 | `gateware/hub75.py` | HUB75 display driver gateware (includes `fb_base` CSR) |
-| `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, network loop, DHCP, telnet IAC parser |
+| `sw_rust/barsign_disp/src/main.rs` | Firmware entry point, ISR setup, main loop (display/animation only) |
+| `sw_rust/barsign_disp/src/network.rs` | ISR network handler: packet processing, DHCP, TFTP config, HTTP, telnet |
 | `sw_rust/barsign_disp/src/http.rs` | HTTP/1.1 server: status page, REST API for layout/display/patterns |
 | `sw_rust/barsign_disp/src/hub75.rs` | HUB75 driver: double-buffered framebuffer, swap_buffers() |
 | `sw_rust/barsign_disp/src/menu.rs` | Telnet CLI commands (pattern, quit, animation) |
@@ -81,32 +82,33 @@ The CPU always writes to the **back buffer** via `write_img_data()`, then calls 
 
 Animation state is stored in `Context.animation` (enum: `None`, `Rainbow { phase }`). The main loop calls `animation_tick()` every 33ms (~30fps). Each tick writes a new frame to the back buffer and swaps.
 
-## Main Loop Architecture
+## ISR-Driven Network Architecture
 
-The firmware main loop (`main.rs`) has two processing paths to balance packet throughput against feature responsiveness:
+Since v1.10.0, all network processing runs inside the VexRiscv external interrupt handler (`network_handler()` in `network.rs`). The main loop does **zero** network code — only display refresh, animation, and serial menu.
 
-### Fast Path (every iteration)
+### ISR Packet Processing
 
-1. **Raw bitmap drain** — `drain_raw_bitmap!()` reads MAC RX slots directly via `peek_rx()`, bypassing smoltcp entirely. Only bitmap UDP packets (port 7000) are consumed; non-bitmap packets are left in the queue.
-2. **Burst loop** — If a non-bitmap packet blocks the RX queue, behavior depends on the streaming state:
-   - **Streaming:** The packet is **discarded** via `ack_rx()` and the next raw drain runs immediately. No `iface.poll()` is called — this avoids multi-ms stalls from smoltcp processing TCP/DHCP state machines, which were causing MAC FIFO overflows at high packet rates.
-   - **Idle:** `iface.poll()` is called to process the packet normally (ARP, TCP, DHCP), followed by a raw drain pass and a socket-level bitmap drain as fallback. Up to 50 iterations.
+When the ETHMAC fires an interrupt (IRQ #2), the assembly trap handler saves all GPRs and calls `network_handler()`. The handler processes up to 64 packets per invocation:
 
-### Slow Path (5ms tick, idle only)
+1. **Bitmap UDP (fast path)** — `is_bitmap_udp()` checks dst_port 7000 directly from the raw frame. Matching packets bypass smoltcp entirely and write pixels via `process_raw_bitmap()`.
+2. **Multicast drop** — VRRP, mDNS, and other multicast traffic is silently dropped.
+3. **Unwanted UDP drop** — UDP packets for ports we don't use (NetBIOS, etc.) are dropped. Allowed ports: 7000 (bitmap), 6454 (Art-Net), 67/68 (DHCP), 69 (TFTP server), 6900 (TFTP client).
+4. **Slow path** — Everything else (ARP, TCP, remaining UDP) goes through `iface.poll()` for smoltcp processing. Socket handlers run afterward: telnet, HTTP, DHCP, TFTP config, Art-Net, bitmap fallback.
 
-Handles DHCP, telnet, HTTP, Art-Net, TFTP config, animation, and MAC error counters. Runs every 5ms when the timer fires.
+After processing, the ISR disables `ev_enable` to prevent interrupt storms. The main loop re-enables it via `check_and_reenable_interrupt()`.
+
+### Main Loop
+
+The main loop (`main.rs`) runs continuously and handles only:
+- **Timer tracking** — reads `TIME_MS` maintained by the ISR
+- **Interrupt re-enable** — calls `check_and_reenable_interrupt()` each iteration
+- **Animation** — updates display at ~30fps when not streaming
+- **Serial menu** — processes telnet/serial input
+- **MAC error counters** — updates diagnostics every 5ms
 
 ### Streaming Detection
 
-The firmware tracks `last_bitmap_packet_ms` — updated every time any bitmap UDP packet is received (in both raw drain and socket fallback paths). Streaming is active when `time_ms - last_bitmap_packet_ms < 200`. This timeout-based approach ensures the flag clears reliably even if the last frame was incomplete (a partial frame with nonzero `chunks_count` won't keep the flag stuck).
-
-### Streaming Mode Behavior
-
-While streaming is active:
-- **Slow path is skipped entirely** — no DHCP, telnet, HTTP, Art-Net, or animation processing.
-- **Non-bitmap packets are discarded** — the fast-path burst loop calls `ack_rx()` instead of `iface.poll()`, preventing smoltcp stalls.
-- **HTTP and telnet do not respond** — the board is unreachable via web browser or telnet during active streaming. The sender's ARP entry is already cached so UDP delivery is unaffected.
-- **Services resume within 200ms** of the last bitmap packet arriving.
+The ISR tracks `LAST_BITMAP_PACKET_MS` — updated on every bitmap UDP packet. Streaming is active when `TIME_MS - LAST_BITMAP_PACKET_MS < 200`.
 
 ### MAC RX FIFO
 
@@ -123,6 +125,80 @@ The telnet input path in `main.rs` includes a state machine that strips IAC (Int
 - **4**: IAC inside subneg - `0xF0` (SE) ends it, return to state 0
 
 Without this parser, telnet option bytes (e.g. `0x22` = `"`) leak through as spurious menu input.
+
+## Panel Configuration Layers
+
+Panel configuration has three layers that must be consistent:
+
+### Layer 1: Gateware (bitstream)
+Built with `--panel` and `--chain-length`. Controls the HUB75 shift register timing:
+- **columns**: pixels per shift-register row (e.g., 128 for a 128x64 panel)
+- **rows**: total pixel rows (e.g., 64)
+- **scan**: address lines = rows/2 (e.g., 32 for 1/32 scan)
+- **chain_length_2**: log2 of panels per output (0=1 panel, 1=2 panels)
+- **n_outputs**: number of HUB75 outputs (default 6)
+
+These are exposed as read-only CSRs (`hw_columns`, `hw_rows`, `hw_config`)
+so the firmware can read them and display them on the web GUI.
+
+**Default build**: `./build.sh` produces columns=128, rows=64, scan=32, chain_length_2=1, n_outputs=6.
+This means each output drives two 128-pixel-wide panels via daisy-chain.
+
+### Layer 2: Firmware constants
+`hub75.rs` constants must match gateware:
+- `CHAIN_LENGTH` must equal `1 << chain_length_2` (e.g., 2 for chain_length_2=1)
+- `OUTPUTS` must equal `n_outputs` (e.g., 6)
+
+Mismatch crashes the SoC (firmware accesses nonexistent panel CSRs).
+
+At startup, the firmware reads `hw_columns` and `hw_rows` from the bitstream CSRs
+to set the default display size. This is overridden by the TFTP config if one is loaded.
+
+### Layer 3: Runtime layout (TFTP YAML)
+Loaded at boot from `.tftp/<mac>.yml` via TFTP (port 6969). Maps logical panels to
+physical connectors and defines the virtual display grid:
+- `grid`: grid dimensions (e.g., `2x1` = 2 columns, 1 row)
+- `panel_width` / `panel_height`: size of each panel in pixels
+- `J1`–`J6`: connector-to-grid mapping with chain slot positions
+
+The virtual display size = `panel_width × grid_cols` by `panel_height × grid_rows`.
+This must not exceed the bitstream's column/row limits.
+
+**Example**: For two 128x64 panels on J1 forming a 256x64 display:
+```yaml
+grid: 2x1
+panel_width: 128
+panel_height: 64
+J1: 0,0 1,0
+```
+J1's first chain slot `[0]` maps to grid position (0,0), second slot `[1]` to (1,0).
+
+### Connector Map (all 6 outputs)
+
+| Connector | Output Index | Chain Slots | Panel CSRs |
+|-----------|-------------|-------------|------------|
+| J1 | 0 | [0], [1] | panel0_0, panel0_1 |
+| J2 | 1 | [0], [1] | panel1_0, panel1_1 |
+| J3 | 2 | [0], [1] | panel2_0, panel2_1 |
+| J4 | 3 | [0], [1] | panel3_0, panel3_1 |
+| J5 | 4 | [0], [1] | panel4_0, panel4_1 |
+| J6 | 5 | [0], [1] | panel5_0, panel5_1 |
+
+Each panel CSR contains x (8-bit, x16), y (8-bit, x16), rot (2-bit).
+
+## Boot Sequence
+
+1. **BIOS loads** — Runs from ROM, initializes SDRAM
+2. **BIOS TFTP** — Fetches `boot.bin` from hardcoded server `10.11.6.65:6969` (standard port 69 also supported via dnsmasq)
+3. **Firmware starts** — Reads flash UID, derives unique MAC (`02:xx:xx:xx:xx:xx`), initializes HUB75 with default image
+4. **Interrupt setup** — Installs trap handler, enables ETHMAC IRQ #2
+5. **DHCP** — Acquires IP address; falls back to `10.11.6.250/24` after 10 seconds
+6. **TFTP config** — On DHCP completion, fetches `<mac>.yml` from TFTP server (DHCP Option 66, or fallback `10.11.6.65`) on port 6969
+7. **Layout applied** — Parses YAML, configures panel CSRs, redraws display at new virtual size
+8. **Main loop** — Runs animation/display; all network handled by ISR
+
+Steps 5–7 happen inside the ISR's `network_handler()`. The TFTP config fetch
+typically completes within 1–2 seconds of DHCP completion.
 
 ## Hardware Notes
 

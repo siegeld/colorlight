@@ -449,21 +449,19 @@ pub extern "C" fn network_handler() {
         }
 
         // Handle socket events
-        // TCP handlers run every ISR (cheap when idle, needed for reliable HTTP)
-        // UDP handlers only run when UDP packets arrive (optimization)
+        // All handlers run unconditionally — iface.poll() may process multiple
+        // packets from the FIFO in a single call, so had_udp/had_tcp flags
+        // only reflect the peeked packet, not everything smoltcp consumed.
         handle_telnet(iface);
         let http_needs_poll = handle_http(iface);
-        if had_udp {
-            handle_dhcp(iface);
-            handle_tftp(iface);
-            handle_artnet(iface);
-            handle_bitmap_smoltcp(iface);
-        }
-        // Poll if slow-path packet or HTTP needs to send FIN
-        let had_slow_path = had_arp || had_tcp || had_udp;
-        if had_slow_path || http_needs_poll {
-            iface.poll(time).ok();
-        }
+        handle_dhcp(iface);
+        handle_tftp(iface);
+        handle_artnet(iface);
+        handle_bitmap_smoltcp(iface);
+
+        // Always poll to transmit any queued responses (ACKs, HTTP, etc.)
+        // Handlers may have queued data even without slow-path packets in this batch.
+        iface.poll(time).ok();
 
         crate::ethernet::check_and_reenable_interrupt();
     }
@@ -534,11 +532,20 @@ unsafe fn handle_dhcp(iface: &mut Interface<'static, Eth>) {
 /// Handle TFTP config loading.
 unsafe fn handle_tftp(iface: &mut Interface<'static, Eth>) {
     let tftp_loader = TFTP_LOADER.assume_init_mut();
+    let tftp_handle = *TFTP_UDP_HANDLE.assume_init_ref();
+
+    // Close socket after Done (ACK was transmitted by previous iface.poll())
+    if tftp_loader.is_done() {
+        let socket = iface.get_socket::<UdpSocket>(tftp_handle);
+        if socket.is_open() {
+            socket.close();
+        }
+        return;
+    }
     if !tftp_loader.is_active() {
         return;
     }
 
-    let tftp_handle = *TFTP_UDP_HANDLE.assume_init_ref();
     let socket = iface.get_socket::<UdpSocket>(tftp_handle);
 
     if tftp_loader.poll(socket, TIME_MS) {
@@ -838,12 +845,18 @@ a{{color:#7090d0;text-decoration:none}}\
     write!(resp, "</table></div>").ok();
 
     // Display card
+    let (hw_cols, hw_rows, hw_scan, hw_cl2, hw_outs) = if !HUB75_PTR.is_null() {
+        (*HUB75_PTR).get_hw_info()
+    } else { (0, 0, 0, 0, 0) };
+    let hw_chain = 1u8 << hw_cl2;
     write!(resp, "<div class=c><h2>Display</h2><table>\
+<tr><td>Hardware</td><td>{}\u{00d7}{} <span style='color:#5a5a6a'>(1/{} scan, {} out \u{00d7} {} chain)</span></td></tr>\
 <tr><td>Resolution</td><td>{}x{}</td></tr>\
 <tr><td>Virtual Grid</td><td>{}x{} = {}x{}</td></tr>\
 <tr><td>Panel Size</td><td>{}x{}</td></tr>\
 <tr><td>Animation</td><td>{}</td></tr>\
 </table></div>",
+        hw_cols, hw_rows, hw_scan, hw_outs, hw_chain,
         w, h,
         layout.grid_cols, layout.grid_rows, layout.virtual_width(), layout.virtual_height(),
         layout.panel_width, layout.panel_height, anim).ok();
@@ -897,22 +910,19 @@ a{{color:#7090d0;text-decoration:none}}\
         DBG_MULTICAST_DROPPED,
         if dbg_batch > 8 { "warn" } else { "" }, dbg_batch).ok();
 
-    // Panels card - only show J1 and J2 (first 2 outputs, 2 chain slots each)
+    // Panels card - show all 6 connectors; only show chain slot [1] if chain_length > 1
+    let max_chain_slots = if hw_cl2 > 0 { 2usize } else { 1usize };
     write!(resp, "<div class=c><h2>Panel Assignments</h2><table>").ok();
-    for i in 0..2 {
+    for i in 0..6 {
         if i < layout.assignments.len() {
-            for c in 0..2 {
+            for c in 0..max_chain_slots {
                 if c < layout.assignments[i].len() {
-                    let label = match (i, c) {
-                        (0, 0) => "J1[0]", (0, 1) => "J1[1]",
-                        (1, 0) => "J2[0]", _ => "J2[1]",
-                    };
                     match layout.assignments[i][c] {
                         Some((col, row)) => {
-                            write!(resp, "<tr><td>{}</td><td>{},{}</td></tr>", label, col, row).ok();
+                            write!(resp, "<tr><td>J{}[{}]</td><td>{},{}</td></tr>", i + 1, c, col, row).ok();
                         }
                         None => {
-                            write!(resp, "<tr><td>{}</td><td style='color:#404060'>-</td></tr>", label).ok();
+                            write!(resp, "<tr><td>J{}[{}]</td><td style='color:#404060'>-</td></tr>", i + 1, c).ok();
                         }
                     }
                 }
@@ -969,6 +979,11 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
     write!(resp, r#"{{"mac":"{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}","#,
         m[0], m[1], m[2], m[3], m[4], m[5]).ok();
     write!(resp, r#""ip":"{}.{}.{}.{}","#, ip[0], ip[1], ip[2], ip[3]).ok();
+    let (hw_cols, hw_rows, hw_scan, hw_cl2, hw_outs) = if !HUB75_PTR.is_null() {
+        (*HUB75_PTR).get_hw_info()
+    } else { (0, 0, 0, 0, 0) };
+    write!(resp, r#""hw_columns":{},"hw_rows":{},"hw_scan":{},"hw_chain_length":{},"hw_outputs":{},"#,
+        hw_cols, hw_rows, hw_scan, 1u8 << hw_cl2, hw_outs).ok();
     write!(resp, r#""display_width":{},"display_height":{},"#, w, h).ok();
     write!(resp, r#""grid":"{}x{}","virtual_width":{},"virtual_height":{},"#,
         layout.grid_cols, layout.grid_rows, layout.virtual_width(), layout.virtual_height()).ok();
@@ -994,14 +1009,12 @@ unsafe fn api_layout_get(resp: &mut HttpResponse) {
         layout.grid_cols, layout.grid_rows, layout.panel_width, layout.panel_height).ok();
     write!(resp, r#""virtual_width":{},"virtual_height":{},"panels":{{"#,
         layout.virtual_width(), layout.virtual_height()).ok();
-    let mut first = true;
-    for (i, chain_slots) in layout.assignments.iter().enumerate() {
-        let has_any = chain_slots.iter().any(|a| a.is_some());
-        if has_any {
-            if !first { write!(resp, ",").ok(); }
+    for i in 0..6 {
+        if i > 0 { write!(resp, ",").ok(); }
+        if i < layout.assignments.len() {
             write!(resp, r#""J{}":["#, i + 1).ok();
             let mut first_slot = true;
-            for a in chain_slots.iter() {
+            for a in layout.assignments[i].iter() {
                 if !first_slot { write!(resp, ",").ok(); }
                 match a {
                     Some((col, row)) => { write!(resp, r#""{},{}""#, col, row).ok(); }
@@ -1010,7 +1023,8 @@ unsafe fn api_layout_get(resp: &mut HttpResponse) {
                 first_slot = false;
             }
             write!(resp, "]").ok();
-            first = false;
+        } else {
+            write!(resp, r#""J{}":[null,null]"#, i + 1).ok();
         }
     }
     write!(resp, "}}}}").ok();
@@ -1219,7 +1233,7 @@ pub fn is_multicast(frame: &[u8]) -> bool {
 }
 
 /// Check if frame is UDP but not a port we care about.
-/// We keep: 7000 (bitmap), 6454 (artnet), 67/68 (DHCP), 69 (TFTP)
+/// We keep: 7000 (bitmap), 6454 (artnet), 67/68 (DHCP), 69 (TFTP), 6900 (TFTP client)
 #[inline]
 pub fn is_unwanted_udp(frame: &[u8]) -> bool {
     if frame.len() < 44 { return false; }
@@ -1227,10 +1241,15 @@ pub fn is_unwanted_udp(frame: &[u8]) -> bool {
     if frame[12] != 0x08 || frame[13] != 0x00 { return false; }
     // Protocol UDP
     if frame[23] != 17 { return false; }
-    // Get destination port (assuming IHL=5 for simplicity, offset 36-37)
-    let dst_port = ((frame[36] as u16) << 8) | frame[37] as u16;
+    // Get IP header length (IHL field) to find UDP header at variable offset
+    let ihl = (frame[14] & 0x0F) as usize;
+    if ihl < 5 { return false; }
+    let udp_offset = 14 + ihl * 4;
+    if frame.len() < udp_offset + 4 { return false; }
+    // UDP destination port (bytes 2-3 of UDP header)
+    let dst_port = ((frame[udp_offset + 2] as u16) << 8) | frame[udp_offset + 3] as u16;
     // Keep these ports, drop everything else
-    !matches!(dst_port, 7000 | 6454 | 67 | 68 | 69)
+    !matches!(dst_port, 7000 | 6454 | 67 | 68 | 69 | 6900)
 }
 
 /// Check if frame is an ARP request not for us (can be dropped during streaming)
