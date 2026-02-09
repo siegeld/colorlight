@@ -496,3 +496,56 @@ Based on work by:
 4. Submit a pull request
 
 Please follow existing code style and include tests where applicable.
+
+## References
+
+### Hardware
+
+| Component | Documentation |
+|-----------|---------------|
+| **Colorlight 5A-75E** | [q3k/chubby75 Reverse Engineering](https://github.com/q3k/chubby75/tree/master/5a-75e) |
+| **Lattice ECP5 FPGA** | [ECP5 Family Datasheet](https://www.latticesemi.com/view_document?document_id=50461) · [Technical Reference](https://www.latticesemi.com/view_document?document_id=50462) |
+| **HUB75 Protocol** | [HUB75 LED Matrix Panels](https://learn.adafruit.com/32x16-32x32-rgb-led-matrix/overview) · [Timing Diagrams](https://bikerglen.com/projects/lighting/led-panel-1up/) |
+| **RTL8211FD PHY** | [Datasheet](https://www.realtek.com/en/products/communications-network-ics/item/rtl8211fd-cg) |
+
+### FPGA Toolchain
+
+| Tool | Description |
+|------|-------------|
+| **Yosys** | [Open synthesis suite](https://github.com/YosysHQ/yosys) |
+| **nextpnr-ecp5** | [Place and route for ECP5](https://github.com/YosysHQ/nextpnr) |
+| **Project Trellis** | [ECP5 bitstream documentation](https://github.com/YosysHQ/prjtrellis) |
+| **openFPGALoader** | [Universal FPGA programmer](https://github.com/trabucayre/openFPGALoader) |
+
+### SoC Framework
+
+| Component | Documentation |
+|-----------|---------------|
+| **LiteX** | [SoC builder framework](https://github.com/enjoy-digital/litex) · [Wiki](https://github.com/enjoy-digital/litex/wiki) |
+| **VexRiscv** | [RISC-V CPU core](https://github.com/SpinalHDL/VexRiscv) |
+| **LiteEth** | [Ethernet MAC](https://github.com/enjoy-digital/liteeth) |
+| **Migen** | [Python-to-HDL](https://github.com/m-labs/migen) |
+
+### Firmware
+
+| Component | Documentation |
+|-----------|---------------|
+| **Rust Embedded** | [Embedded Rust Book](https://docs.rust-embedded.org/book/) |
+| **RISC-V Target** | [riscv32i-unknown-none-elf](https://doc.rust-lang.org/rustc/platform-support/riscv32-unknown-none-elf.html) |
+| **smoltcp** | [TCP/IP stack](https://github.com/smoltcp-rs/smoltcp) · [Docs](https://docs.rs/smoltcp) |
+
+### Protocols
+
+| Protocol | Specification |
+|----------|---------------|
+| **DHCP** | [RFC 2131](https://datatracker.ietf.org/doc/html/rfc2131) · [Option 66 (TFTP)](https://datatracker.ietf.org/doc/html/rfc2132#section-9.4) |
+| **TFTP** | [RFC 1350](https://datatracker.ietf.org/doc/html/rfc1350) |
+| **Art-Net** | [Protocol Specification](https://art-net.org.uk/resources/art-net-specification/) |
+
+### Project Documentation
+
+| Document | Description |
+|----------|-------------|
+| [ARCH.md](ARCH.md) | Architecture, memory map, ISR design, debugging |
+| [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
+| [CLAUDE.md](CLAUDE.md) | AI development hints and build commands |
