@@ -349,7 +349,6 @@ pub extern "C" fn network_handler() {
         }
 
         // Update TIME_MS by draining timer ticks
-        // This ensures no ticks are lost even when main loop is starved
         update_time_from_timer();
 
         let iface = IFACE.assume_init_mut();
@@ -361,28 +360,28 @@ pub extern "C" fn network_handler() {
             let eth = iface.device();
             match eth.peek_rx() {
                 Some(frame) if is_bitmap_udp(frame) => {
-                    // Bitmap UDP: copy pixels directly (fast path)
+                    // Bitmap UDP: process directly (fast path)
                     process_raw_bitmap(frame);
                     eth.ack_rx();
                 }
                 Some(_) => {
-                    // Non-bitmap: let smoltcp process it
+                    // Non-bitmap: let smoltcp process
                     iface.poll(time).ok();
                     had_non_bitmap = true;
                 }
-                None => break, // No more packets
+                None => break,
             }
         }
 
-        // Only handle sockets if we had non-bitmap packets
+        // Handle socket events if we had non-bitmap packets
         if had_non_bitmap {
             handle_dhcp(iface);
             handle_tftp(iface);
             handle_telnet(iface);
             handle_artnet(iface);
-            handle_bitmap_smoltcp(iface); // Drain bitmap packets that went through smoltcp
+            handle_bitmap_smoltcp(iface);
             handle_http(iface);
-            iface.poll(time).ok(); // Send any responses
+            iface.poll(time).ok();
         }
 
         crate::ethernet::check_and_reenable_interrupt();
@@ -1108,6 +1107,7 @@ pub fn process_raw_bitmap(frame: &[u8]) -> bool {
             return false;
         }
 
+        // Update streaming timestamp on every packet
         LAST_BITMAP_PACKET_MS = TIME_MS;
 
         let hub75 = &mut *HUB75_PTR;
@@ -1116,6 +1116,7 @@ pub fn process_raw_bitmap(frame: &[u8]) -> bool {
         // Skip Ethernet(14) + IP(20) + UDP(8) = 42 byte header
         let complete = bitmap_rx.process_packet(&frame[42..], hub75, TIME_MS);
 
+        // Only do expensive operations on frame completion
         if complete {
             hub75.swap_buffers();
             hub75.set_mode(crate::hub75::OutputMode::FullColor);
@@ -1123,10 +1124,9 @@ pub fn process_raw_bitmap(frame: &[u8]) -> bool {
             if !ANIMATION_PTR.is_null() {
                 *ANIMATION_PTR = crate::menu::Animation::None;
             }
-        }
-
-        if !BITMAP_STATS_PTR.is_null() {
-            *BITMAP_STATS_PTR = bitmap_rx.stats;
+            if !BITMAP_STATS_PTR.is_null() {
+                *BITMAP_STATS_PTR = bitmap_rx.stats;
+            }
         }
 
         complete

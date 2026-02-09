@@ -321,6 +321,28 @@ pub fn increment_isr_count() {
     unsafe { ISR_COUNT += 1; }
 }
 
+/// Push a packet to the ring buffer.
+/// Returns true if successful, false if ring is full.
+pub fn push_to_ring(data: &[u8]) -> bool {
+    let len = data.len().min(RX_SLOT_SIZE);
+    let write_idx = RX_WRITE_IDX.load(Ordering::Relaxed);
+    let next_idx = (write_idx + 1) % RX_RING_SIZE;
+
+    // Check for overflow (ring full)
+    if next_idx == RX_READ_IDX.load(Ordering::Acquire) {
+        unsafe { RX_RING_OVERFLOW += 1; }
+        return false;
+    }
+
+    // Copy packet to ring buffer
+    unsafe {
+        RX_RING[write_idx][..len].copy_from_slice(&data[..len]);
+        RX_RING_LEN[write_idx] = len;
+    }
+    RX_WRITE_IDX.store(next_idx, Ordering::Release);
+    true
+}
+
 /// Pop a packet from the ring buffer.
 /// Returns a reference to the packet data, or None if the ring is empty.
 /// The returned slice is valid until the next call to ring_pop().
