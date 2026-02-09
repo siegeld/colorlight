@@ -596,79 +596,441 @@ unsafe fn handle_http(iface: &mut Interface<'static, Eth>) {
     }
 }
 
-/// Handle HTTP request in ISR context (limited functionality).
+/// Handle HTTP request in ISR context.
 unsafe fn handle_http_request(req: &HttpRequest, resp: &mut HttpResponse, ip: [u8; 4]) {
     use core::fmt::Write;
     use crate::http::Method;
 
     match (req.method(), req.path()) {
-        (Method::Get, "/") => {
-            // HTML status page
-            resp.data.clear();
-            resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n").ok();
-
-            // Get display info
-            let (w, len) = if !HUB75_PTR.is_null() {
-                (*HUB75_PTR).get_img_param()
-            } else {
-                (0, 0)
-            };
-            let h = if w > 0 { len / w as u32 } else { 0 };
-
-            write!(resp, r#"<!DOCTYPE html><html><head>
-<meta charset=utf-8><title>Colorlight v{}</title>
-<style>body{{font:14px system-ui;background:#0f0f17;color:#ccc;padding:24px}}
-h1{{color:#fff;border-left:3px solid #4a4ae0;padding-left:12px}}
-.c{{background:#181828;border:1px solid #252540;border-radius:8px;padding:14px;margin:10px 0}}
-table{{width:100%}}td{{padding:3px 0}}td:first-child{{color:#7a7a9a}}td+td{{text-align:right}}</style></head>
-<body><h1>Colorlight v{}</h1>
-<div class=c><table>
-<tr><td>IP</td><td>{}.{}.{}.{}</td></tr>
-<tr><td>Display</td><td>{}x{}</td></tr>
-<tr><td>Mode</td><td>ISR-driven</td></tr>
-</table></div>
-<div class=c><b>Endpoints:</b><br>
-GET /api/status - JSON status<br>
-POST /api/reboot - Reboot device
-</div></body></html>"#,
-                env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"),
-                ip[0], ip[1], ip[2], ip[3], w, h).ok();
-        }
-        (Method::Get, "/api/status") => {
-            // JSON status
-            resp.data.clear();
-            resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
-            write!(resp, r#"{{"ip":"{}.{}.{}.{}","isr":true}}"#,
-                ip[0], ip[1], ip[2], ip[3]).ok();
-        }
-        (Method::Post, "/api/irq/enable") => {
-            // Enable ETHMAC interrupt
-            // 1. Enable ETHMAC peripheral interrupt (event manager)
-            crate::ethernet::enable_rx_interrupt();
-
-            // 2. Set VexRiscv IRQ_MASK bit 2 (ETHMAC is IRQ #2)
-            core::arch::asm!("csrw 0xBC0, {}", in(reg) (1u32 << 2));
-
-            // 3. Enable machine external interrupts and global interrupt enable
-            riscv::register::mie::set_mext();
-            riscv::register::mstatus::set_mie();
-
-            resp.data.clear();
-            resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
-            resp.data.extend_from_slice(br#"{"ok":true,"interrupts_enabled":true}"#).ok();
-        }
-        (Method::Post, "/api/reboot") => {
-            resp.data.clear();
-            resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
-            resp.data.extend_from_slice(br#"{"ok":true,"rebooting":true}"#).ok();
-            // Schedule reboot after response is sent
-            // Can't do it here as we need to send response first
-        }
+        (Method::Get, "/") => page_status(resp, ip),
+        (Method::Get, "/api/status") => api_status(resp, ip),
+        (Method::Get, "/api/layout") => api_layout_get(resp),
+        (Method::Get, "/api/display") => api_display_get(resp),
+        (Method::Get, "/api/bitmap/stats") => api_bitmap_stats(resp),
+        (Method::Post, "/api/display/on") => api_display_on(resp),
+        (Method::Post, "/api/display/off") => api_display_off(resp),
+        (Method::Post, "/api/display/pattern") => api_display_pattern(req, resp),
+        (Method::Post, "/api/reboot") => api_reboot(resp),
         _ => {
             resp.data.clear();
             resp.data.extend_from_slice(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nNot Found").ok();
         }
     }
+}
+
+// ============================================================================
+// HTTP Page and API Handlers
+// ============================================================================
+
+unsafe fn page_status(resp: &mut HttpResponse, ip: [u8; 4]) {
+    use core::fmt::Write;
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: text/html;charset=utf-8\r\nConnection: close\r\n\r\n").ok();
+
+    let m = &MAC_BYTES;
+    let (w, len) = if !HUB75_PTR.is_null() { (*HUB75_PTR).get_img_param() } else { (0, 0) };
+    let h = if w > 0 { len / w as u32 } else { 0 };
+    let layout = if !LAYOUT_PTR.is_null() { &*LAYOUT_PTR } else { return; };
+    let stats = if !BITMAP_STATS_PTR.is_null() { &*BITMAP_STATS_PTR } else { return; };
+    let anim = if !ANIMATION_PTR.is_null() {
+        match &*ANIMATION_PTR {
+            crate::menu::Animation::None => "None",
+            crate::menu::Animation::Rainbow { .. } => "Rainbow",
+        }
+    } else { "Unknown" };
+
+    // Get hardware counters
+    let (mac_ovf, mac_pre, mac_crc) = if IFACE_INITIALIZED {
+        IFACE.assume_init_ref().device().mac_errors()
+    } else { (0, 0, 0) };
+    let ring_ovf = crate::ethernet::ring_overflow_count();
+    let isr_count = crate::ethernet::isr_count();
+
+    // Calculate FPS
+    let avg = stats.avg_interval_ms;
+    let fps = if avg > 0 { 1000 / avg } else { 0 };
+
+    // Read CSRs for interrupt status
+    let mstatus: u32;
+    let mie: u32;
+    let irq_mask: u32;
+    core::arch::asm!("csrr {}, mstatus", out(reg) mstatus);
+    core::arch::asm!("csrr {}, mie", out(reg) mie);
+    core::arch::asm!("csrr {}, 0xBC0", out(reg) irq_mask);
+    let mie_enabled = (mstatus & 0x8) != 0;
+    let meie_enabled = (mie & 0x800) != 0;
+    let ethmac_masked = (irq_mask & 0x4) != 0;
+
+    // HTML head with professional dark theme
+    write!(resp, "\
+<!DOCTYPE html><html><head>\
+<meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>\
+<link rel=icon href='data:,'><title>Colorlight {}</title>\
+<style>\
+*{{margin:0;box-sizing:border-box}}\
+body{{font:15px/1.5 system-ui,sans-serif;background:#0a0a0f;color:#c0c0c8;padding:24px}}\
+h1{{font-size:22px;color:#e8e8f0;margin:0 0 20px;padding-left:12px;border-left:4px solid #5050d0}}\
+.g{{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}}\
+.c{{background:#14141e;border:1px solid #202030;border-radius:8px;padding:16px}}\
+.c h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#6060a0;margin:0 0 12px;font-weight:600}}\
+table{{width:100%;border-collapse:collapse}}\
+td{{padding:4px 0;font-size:15px}}td:first-child{{color:#8080a0}}\
+td+td{{text-align:right;color:#e0e0e8;font-variant-numeric:tabular-nums}}\
+.ok{{color:#50d080}}.warn{{color:#f0a050}}.err{{color:#e05050}}\
+select,button{{font:14px system-ui;background:#1c1c2c;color:#d0d0d8;border:1px solid #303048;padding:8px 14px;border-radius:6px}}\
+button{{background:#4848b0;color:#fff;border:0;cursor:pointer}}button:hover{{background:#5858c0}}\
+.mono{{font-family:monospace}}\
+.ft{{margin-top:20px;text-align:center;font-size:13px;color:#4a4a6a}}\
+a{{color:#7090d0;text-decoration:none}}\
+</style></head><body>\
+<h1>Colorlight v{} <span style='font-size:13px;color:#6a6a8a;font-weight:normal'>// Interrupt-Driven</span></h1><div class=g>",
+        env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION")).ok();
+
+    // Network card
+    write!(resp, "<div class=c><h2>Network</h2><table>\
+<tr><td>MAC</td><td class=mono>{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}</td></tr>\
+<tr><td>IPv4</td><td class=mono>{}.{}.{}.{}</td></tr>",
+        m[0], m[1], m[2], m[3], m[4], m[5],
+        ip[0], ip[1], ip[2], ip[3]).ok();
+    if let Some((sip, source)) = BOOT_SERVER {
+        let src = match source {
+            crate::menu::BootServerSource::Option66 => "DHCP opt66",
+            crate::menu::BootServerSource::Fallback => "fallback",
+        };
+        write!(resp, "<tr><td>TFTP Server</td><td class=mono>{}.{}.{}.{} <span style='color:#5a5a6a'>({})</span></td></tr>",
+            sip[0], sip[1], sip[2], sip[3], src).ok();
+    }
+    write!(resp, "</table></div>").ok();
+
+    // Display card
+    write!(resp, "<div class=c><h2>Display</h2><table>\
+<tr><td>Resolution</td><td>{}x{}</td></tr>\
+<tr><td>Virtual Grid</td><td>{}x{} = {}x{}</td></tr>\
+<tr><td>Panel Size</td><td>{}x{}</td></tr>\
+<tr><td>Animation</td><td>{}</td></tr>\
+</table></div>",
+        w, h,
+        layout.grid_cols, layout.grid_rows, layout.virtual_width(), layout.virtual_height(),
+        layout.panel_width, layout.panel_height, anim).ok();
+
+    // Interrupt Status card
+    write!(resp, "<div class=c><h2>Interrupt Status</h2><table>\
+<tr><td>ISR Count</td><td class='{}'>{}</td></tr>\
+<tr><td>mstatus.MIE</td><td class='{}'>{}</td></tr>\
+<tr><td>mie.MEIE</td><td class='{}'>{}</td></tr>\
+<tr><td>IRQ_MASK[2]</td><td class='{}'>{}</td></tr>\
+<tr><td>Mode</td><td class='ok'>ISR-driven</td></tr>\
+</table></div>",
+        if isr_count > 0 { "ok" } else { "warn" }, isr_count,
+        if mie_enabled { "ok" } else { "err" }, if mie_enabled { "enabled" } else { "disabled" },
+        if meie_enabled { "ok" } else { "err" }, if meie_enabled { "enabled" } else { "disabled" },
+        if ethmac_masked { "ok" } else { "err" }, if ethmac_masked { "enabled" } else { "disabled" }).ok();
+
+    // Streaming card
+    write!(resp, "<div class=c><h2>Streaming</h2><table>\
+<tr><td>Frames</td><td>{}</td></tr>\
+<tr><td>Partial</td><td class='{}'>{}</td></tr>\
+<tr><td>Dropped</td><td class='{}'>{}</td></tr>\
+<tr><td>FPS</td><td>{} <span style='color:#5a5a6a'>({}ms avg)</span></td></tr>\
+<tr><td>Jitter</td><td class='{}'>{}ms</td></tr>\
+</table></div>",
+        stats.frames_completed,
+        if stats.frames_partial > 0 { "warn" } else { "" }, stats.frames_partial,
+        if stats.frames_dropped > 0 { "err" } else { "" }, stats.frames_dropped,
+        fps, avg,
+        if stats.jitter_ms > 10 { "warn" } else { "" }, stats.jitter_ms).ok();
+
+    // MAC Diagnostics card
+    write!(resp, "<div class=c><h2>MAC Diagnostics</h2><table>\
+<tr><td>RX Overflow</td><td class='{}'>{}</td></tr>\
+<tr><td>CRC Errors</td><td class='{}'>{}</td></tr>\
+<tr><td>Preamble Errors</td><td class='{}'>{}</td></tr>\
+<tr><td>Ring Overflow</td><td class='{}'>{}</td></tr>\
+</table></div>",
+        if mac_ovf > 0 { "err" } else { "" }, mac_ovf,
+        if mac_crc > 0 { "err" } else { "" }, mac_crc,
+        if mac_pre > 0 { "warn" } else { "" }, mac_pre,
+        if ring_ovf > 0 { "err" } else { "" }, ring_ovf).ok();
+
+    // Panels card - only show J1 and J2 (first 2 outputs, 2 chain slots each)
+    write!(resp, "<div class=c><h2>Panel Assignments</h2><table>").ok();
+    for i in 0..2 {
+        if i < layout.assignments.len() {
+            for c in 0..2 {
+                if c < layout.assignments[i].len() {
+                    let label = match (i, c) {
+                        (0, 0) => "J1[0]", (0, 1) => "J1[1]",
+                        (1, 0) => "J2[0]", _ => "J2[1]",
+                    };
+                    match layout.assignments[i][c] {
+                        Some((col, row)) => {
+                            write!(resp, "<tr><td>{}</td><td>{},{}</td></tr>", label, col, row).ok();
+                        }
+                        None => {
+                            write!(resp, "<tr><td>{}</td><td style='color:#404060'>-</td></tr>", label).ok();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    write!(resp, "</table></div>").ok();
+
+    // Controls card
+    write!(resp, "<div class=c><h2>Controls</h2>\
+<div style='margin-bottom:8px'>\
+<select id=p>\
+<option>grid<option>rainbow<option>rainbow_anim\
+<option>white<option>red<option>green<option>blue\
+</select> \
+<button onclick=\"fetch('/api/display/pattern',{{method:'POST',headers:{{'Content-Type':'application/json'}},\
+body:JSON.stringify({{name:p.value}})}}).then(r=>r.json()).then(j=>{{m.textContent=j.ok?'OK':'Error'}})\
+.catch(()=>{{m.textContent='Failed'}})\">Load</button> \
+<span id=m style='color:#5a5a6a'></span></div>\
+<button onclick=\"fetch('/api/reboot',{{method:'POST'}});this.textContent='Rebooting...';this.disabled=1\">Reboot</button>\
+</div>").ok();
+
+    // Footer
+    write!(resp, "</div><div class=ft>\
+<a href=/api/status>status</a> · \
+<a href=/api/layout>layout</a> · \
+<a href=/api/display>display</a> · \
+<a href=/api/bitmap/stats>bitmap/stats</a>\
+</div></body></html>").ok();
+}
+
+unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
+    use core::fmt::Write;
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+
+    let m = &MAC_BYTES;
+    let (w, len) = if !HUB75_PTR.is_null() { (*HUB75_PTR).get_img_param() } else { (0, 0) };
+    let h = if w > 0 { len / w as u32 } else { 0 };
+    let layout = if !LAYOUT_PTR.is_null() { &*LAYOUT_PTR } else { return; };
+    let stats = if !BITMAP_STATS_PTR.is_null() { &*BITMAP_STATS_PTR } else { return; };
+    let anim = if !ANIMATION_PTR.is_null() {
+        match &*ANIMATION_PTR {
+            crate::menu::Animation::None => "none",
+            crate::menu::Animation::Rainbow { .. } => "rainbow",
+        }
+    } else { "unknown" };
+
+    let isr_count = crate::ethernet::isr_count();
+    let (mac_ovf, mac_pre, mac_crc) = if IFACE_INITIALIZED {
+        IFACE.assume_init_ref().device().mac_errors()
+    } else { (0, 0, 0) };
+
+    write!(resp, r#"{{"mac":"{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}","#,
+        m[0], m[1], m[2], m[3], m[4], m[5]).ok();
+    write!(resp, r#""ip":"{}.{}.{}.{}","#, ip[0], ip[1], ip[2], ip[3]).ok();
+    write!(resp, r#""display_width":{},"display_height":{},"#, w, h).ok();
+    write!(resp, r#""grid":"{}x{}","virtual_width":{},"virtual_height":{},"#,
+        layout.grid_cols, layout.grid_rows, layout.virtual_width(), layout.virtual_height()).ok();
+    write!(resp, r#""panel_width":{},"panel_height":{},"#, layout.panel_width, layout.panel_height).ok();
+    write!(resp, r#""animation":"{}","bitmap_frames":{},"#, anim, stats.frames_completed).ok();
+    write!(resp, r#""isr_count":{},"isr_driven":true,"#, isr_count).ok();
+    write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{}}}"#,
+        mac_ovf, mac_crc, mac_pre).ok();
+}
+
+unsafe fn api_layout_get(resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+
+    let layout = if !LAYOUT_PTR.is_null() { &*LAYOUT_PTR } else { return; };
+    write!(resp, r#"{{"grid":"{}x{}","panel_width":{},"panel_height":{},"#,
+        layout.grid_cols, layout.grid_rows, layout.panel_width, layout.panel_height).ok();
+    write!(resp, r#""virtual_width":{},"virtual_height":{},"panels":{{"#,
+        layout.virtual_width(), layout.virtual_height()).ok();
+    let mut first = true;
+    for (i, chain_slots) in layout.assignments.iter().enumerate() {
+        let has_any = chain_slots.iter().any(|a| a.is_some());
+        if has_any {
+            if !first { write!(resp, ",").ok(); }
+            write!(resp, r#""J{}":["#, i + 1).ok();
+            let mut first_slot = true;
+            for a in chain_slots.iter() {
+                if !first_slot { write!(resp, ",").ok(); }
+                match a {
+                    Some((col, row)) => { write!(resp, r#""{},{}""#, col, row).ok(); }
+                    None => { write!(resp, "null").ok(); }
+                }
+                first_slot = false;
+            }
+            write!(resp, "]").ok();
+            first = false;
+        }
+    }
+    write!(resp, "}}}}").ok();
+}
+
+unsafe fn api_display_get(resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+
+    let (w, len) = if !HUB75_PTR.is_null() { (*HUB75_PTR).get_img_param() } else { (0, 0) };
+    let h = if w > 0 { len / w as u32 } else { 0 };
+    let mode = if !HUB75_PTR.is_null() {
+        match (*HUB75_PTR).get_mode() {
+            crate::hub75::OutputMode::FullColor => "fullcolor",
+            crate::hub75::OutputMode::Indexed => "indexed",
+        }
+    } else { "unknown" };
+    let anim = if !ANIMATION_PTR.is_null() {
+        match &*ANIMATION_PTR {
+            crate::menu::Animation::None => "none",
+            crate::menu::Animation::Rainbow { .. } => "rainbow",
+        }
+    } else { "unknown" };
+    write!(resp, r#"{{"width":{},"height":{},"mode":"{}","animation":"{}"}}"#, w, h, mode, anim).ok();
+}
+
+unsafe fn api_bitmap_stats(resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+
+    let stats = if !BITMAP_STATS_PTR.is_null() { &*BITMAP_STATS_PTR } else { return; };
+    let fps = if stats.avg_interval_ms > 0 { 1000 / stats.avg_interval_ms } else { 0 };
+    let (mac_ovf, mac_pre, mac_crc) = if IFACE_INITIALIZED {
+        IFACE.assume_init_ref().device().mac_errors()
+    } else { (0, 0, 0) };
+    let ring_ovf = crate::ethernet::ring_overflow_count();
+
+    write!(resp, r#"{{"packets_total":{},"packets_valid":{},"#, stats.packets_total, stats.packets_valid).ok();
+    write!(resp, r#""bad_magic":{},"bad_header":{},"#, stats.packets_bad_magic, stats.packets_bad_header).ok();
+    write!(resp, r#""frames_completed":{},"frames_partial":{},"frames_dropped":{},"#,
+        stats.frames_completed, stats.frames_partial, stats.frames_dropped).ok();
+    write!(resp, r#""fps":{},"frame_interval_ms":{},"avg_interval_ms":{},"jitter_ms":{},"#,
+        fps, stats.frame_interval_ms, stats.avg_interval_ms, stats.jitter_ms).ok();
+    write!(resp, r#""last_frame_id":{},"#, stats.last_frame_id).ok();
+    write!(resp, r#""last_chunk":"{}/{}","last_size":"{}x{}","last_data_len":{},"#,
+        stats.last_chunk_index, stats.last_total_chunks,
+        stats.last_width, stats.last_height, stats.last_data_len).ok();
+    write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{},"ring_overflow":{},"#,
+        mac_ovf, mac_crc, mac_pre, ring_ovf).ok();
+    write!(resp, r#""isr_count":{},"mtvec":"0x{:08x}","trap_addr":"0x{:08x}"}}"#,
+        crate::ethernet::isr_count(), crate::ethernet::debug_mtvec(), crate::ethernet::trap_addr()).ok();
+}
+
+unsafe fn api_display_on(resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    if !HUB75_PTR.is_null() { (*HUB75_PTR).on(); }
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+    write!(resp, r#"{{"ok":true,"display":"on"}}"#).ok();
+}
+
+unsafe fn api_display_off(resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    if !HUB75_PTR.is_null() { (*HUB75_PTR).off(); }
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+    write!(resp, r#"{{"ok":true,"display":"off"}}"#).ok();
+}
+
+unsafe fn api_display_pattern(req: &HttpRequest, resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    resp.data.clear();
+
+    // Parse JSON body for "name" field (simple parser)
+    let body = req.body_str();
+    let name = match json_get_str(body, "name") {
+        Some(n) => n,
+        None => {
+            resp.data.extend_from_slice(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nmissing \"name\"").ok();
+            return;
+        }
+    };
+
+    if HUB75_PTR.is_null() {
+        resp.data.extend_from_slice(b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\nno display").ok();
+        return;
+    }
+    let hub75 = &mut *HUB75_PTR;
+    let (w, len) = hub75.get_img_param();
+    let h = if w > 0 { (len / w as u32) as u16 } else { 0 };
+    if w == 0 || h == 0 {
+        resp.data.extend_from_slice(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nimage params not set").ok();
+        return;
+    }
+
+    use crate::patterns;
+    let mut anim = false;
+    let ok = match name {
+        "grid" => { hub75.write_img_data(0, patterns::grid(w, h)); true }
+        "rainbow" => { hub75.write_img_data(0, patterns::rainbow(w, h)); true }
+        "rainbow_anim" => {
+            hub75.write_img_data(0, patterns::animated_rainbow(w, h, 0));
+            anim = true;
+            true
+        }
+        "white" => { hub75.write_img_data(0, patterns::solid_white(w, h)); true }
+        "red" => { hub75.write_img_data(0, patterns::solid_red(w, h)); true }
+        "green" => { hub75.write_img_data(0, patterns::solid_green(w, h)); true }
+        "blue" => { hub75.write_img_data(0, patterns::solid_blue(w, h)); true }
+        _ => false,
+    };
+
+    if ok {
+        if !ANIMATION_PTR.is_null() {
+            *ANIMATION_PTR = if anim {
+                crate::menu::Animation::Rainbow { phase: 0 }
+            } else {
+                crate::menu::Animation::None
+            };
+        }
+        hub75.swap_buffers();
+        hub75.set_mode(crate::hub75::OutputMode::FullColor);
+        hub75.on();
+        resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+        write!(resp, r#"{{"ok":true,"pattern":"{}"}}"#, name).ok();
+    } else {
+        resp.data.extend_from_slice(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nunknown pattern").ok();
+    }
+}
+
+unsafe fn api_reboot(resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+    write!(resp, r#"{{"ok":true,"rebooting":true}}"#).ok();
+    // Actual reboot would be scheduled after response sent
+}
+
+/// Simple JSON string extractor for "key":"value" patterns
+fn json_get_str<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let b = json.as_bytes();
+    let kb = key.as_bytes();
+    let len = b.len();
+    let mut i = 0;
+    while i < len {
+        if b[i] == b'"' {
+            let ks = i + 1;
+            let ke = ks + kb.len();
+            if ke < len && &b[ks..ke] == kb && b[ke] == b'"' {
+                let mut p = ke + 1;
+                while p < len && b[p] == b' ' { p += 1; }
+                if p < len && b[p] == b':' {
+                    p += 1;
+                    while p < len && b[p] == b' ' { p += 1; }
+                    if p < len && b[p] == b'"' {
+                        let vs = p + 1;
+                        let mut j = vs;
+                        while j < len && b[j] != b'"' { j += 1; }
+                        if j < len {
+                            return core::str::from_utf8(&b[vs..j]).ok();
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 // ============================================================================

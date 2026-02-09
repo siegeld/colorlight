@@ -1,8 +1,8 @@
 //! Test pattern generators for HUB75 LED panels
 
-/// Pack RGB into little-endian u32 (0x00BBGGRR format)
+/// Pack RGB into u32 (0x00GGRRBB format for HUB75 hardware)
 fn rgb(r: u8, g: u8, b: u8) -> u32 {
-    (b as u32) << 16 | (g as u32) << 8 | (r as u32)
+    (g as u32) << 16 | (r as u32) << 8 | (b as u32)
 }
 
 /// Simple 5x7 pixel font for version display

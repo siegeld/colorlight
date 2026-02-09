@@ -165,9 +165,9 @@ impl BitmapReceiver {
         let pixel_data = &data[HEADER_SIZE..];
         let pixel_offset = chunk_index as usize * PIXELS_PER_CHUNK;
 
-        // Convert RGB byte triples to u32 pixels (0x00BBGGRR format)
+        // Convert RGB byte triples to u32 pixels (0x00GGRRBB format for HUB75)
         let pixels = pixel_data.chunks_exact(3).map(|c| {
-            (c[2] as u32) << 16 | (c[1] as u32) << 8 | (c[0] as u32)
+            (c[1] as u32) << 16 | (c[0] as u32) << 8 | (c[2] as u32)
         });
         hub75.write_img_data(pixel_offset, pixels);
 
