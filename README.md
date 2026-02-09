@@ -181,17 +181,31 @@ The build includes a test pattern baked into the firmware:
 ./build.sh --host-ip 10.11.6.65 boot
 ```
 
+#### Build All Targets
+
+```bash
+# Build everything for current panel: docker (if needed) + bitstream + PAC + firmware
+./build.sh all
+./build.sh                          # 'all' is the default when no target specified
+
+# Build bitstreams for ALL panel sizes (saved to bitstreams/) + firmware
+./build.sh build-all
+```
+
+The `build-all` target is useful for creating a complete set of prebuilt bitstreams. Each panel size gets its own bitstream file in `bitstreams/` (e.g., `128x64.bit`, `256x64.bit`). The firmware binary is universal and works with all panels.
+
 #### Quick Reference
 
 | Command | Description |
 |---------|-------------|
-| `./build.sh` | Build everything (docker if needed, bitstream, firmware) |
+| `./build.sh` | Build everything: bitstream + PAC + firmware (default) |
+| `./build.sh all` | Same as above (explicit) |
+| `./build.sh build-all` | Build bitstreams for ALL panel sizes + firmware |
 | `./build.sh firmware` | Rebuild firmware only (universal binary) |
 | `./build.sh boot` | Program SRAM + start TFTP server |
 | `./build.sh flash` | Write bitstream to SPI flash (permanent) |
 | `./build.sh -p 256x64 boot` | Boot with specific panel bitstream |
-| `./build.sh bitstream pac firmware` | Full rebuild after gateware changes |
-| `./build.sh build-all` | Build bitstreams for all panel sizes |
+| `./build.sh bitstream pac firmware` | Explicit full rebuild (same as `all`) |
 | `./build.sh stop` | Stop background TFTP server |
 
 ### Supported Panels
