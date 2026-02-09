@@ -82,15 +82,16 @@ All builds use Docker for reproducibility. Run `./build.sh --help` for full opti
 
 #### Panel-Specific Builds
 
-Panel size is baked into the FPGA bitstream, not runtime-configurable:
+The `--panel` flag sets the size of **one individual panel** (shift register width and row count). This is baked into the FPGA bitstream. The total display size depends on how many panels you chain and arrange in a grid (see [Bitstream vs Layout](#bitstream-vs-layout)).
+
+All prebuilt bitstreams include `chain_length=2` (two panels per output) and `outputs=6`, supporting up to 12 panels total. Chain length and output count are separate `build.sh` flags (`--chain-length`, `--outputs`).
 
 ```bash
-# Build bitstream for a specific panel size
-./build.sh -p 256x64 bitstream      # 256x64 (two 128x64 daisy-chained)
-./build.sh -p 128x64 bitstream      # 128x64 (default)
-./build.sh -p 96x48 bitstream       # 96x48
-./build.sh -p 64x32 bitstream       # 64x32
-./build.sh -p 64x64 bitstream       # 64x64 square
+# Build bitstream for a specific per-panel size
+./build.sh -p 128x64 bitstream      # 128x64 per panel (default)
+./build.sh -p 96x48 bitstream       # 96x48 per panel
+./build.sh -p 64x32 bitstream       # 64x32 per panel
+./build.sh -p 64x64 bitstream       # 64x64 per panel (square)
 
 # Build bitstreams for ALL panel sizes at once (saved to bitstreams/)
 ./build.sh build-all
@@ -250,7 +251,9 @@ The `build-all` target is useful for creating a complete set of prebuilt bitstre
 | 64x32 | 1/16 | Compact |
 | 64x64 | 1/32 | Square format |
 
-The firmware binary is universal — it works with all panel sizes. Only the FPGA bitstream differs per panel. Panel dimensions are configured at runtime via TFTP config files (see below). Use `./build.sh build-all` to pre-build bitstreams for all panels, stored in `bitstreams/`.
+These are **per-panel** sizes. The total virtual display depends on chaining and grid layout — e.g., a 128x64 bitstream with `chain_length=2` supports a 256x64 display (two panels side by side) or larger grids across multiple outputs.
+
+The firmware binary is universal — it works with all panel sizes. Only the FPGA bitstream differs per panel. Panel grid layout is configured at runtime via TFTP config files (see below). Use `./build.sh build-all` to pre-build bitstreams for all panels, stored in `bitstreams/`.
 
 ### Test Connection
 
@@ -373,6 +376,8 @@ Connect via `telnet <ip> 23` to access the management console:
 
 ## Multi-Panel Approaches
 
+Three bitstream parameters control multi-panel capacity: `--panel WxH` (per-panel pixel size), `--chain-length N` (max panels daisy-chained per output, default 2), and `--outputs N` (HUB75 connectors, default 6). Maximum total panels = outputs × chain_length. The virtual display size is set at runtime by the TFTP layout config.
+
 There are two ways to drive multiple panels per HUB75 output:
 
 | Approach | Gateware | Panels per output | Virtual width | Notes |
@@ -388,13 +393,12 @@ The bitstream and the layout config control different things:
 
 | Layer | Set by | Controls | Can change at runtime? |
 |-------|--------|----------|----------------------|
-| **Bitstream** | `--panel` flag at build | Max pixel width, scan rate, shift timing | No — requires reflash |
-| **Layout** | TFTP YAML config | Panel grid, connector mapping, positioning | Yes — applied at boot or via API |
+| **Bitstream** | `--panel`, `--chain-length`, `--outputs` at build | Per-panel pixel size, scan rate, max chain depth, output count | No — requires reflash |
+| **Layout** | TFTP YAML config | Panel grid, connector mapping, virtual display size | Yes — applied at boot or via API |
 
-The bitstream defines the **hard ceiling**: the HUB75 shift registers are
-wired for exactly N columns and M rows. The layout maps logical panels
-onto that framebuffer — it can use less than the full resolution, but
-never more.
+The bitstream sets the **per-panel** pixel dimensions (shift register width and row count) and the **max chain depth** (panels per output). The layout config arranges those panels into a virtual display grid. The firmware sets the DMA `image_width` CSR to the virtual width, which the gateware uses as the framebuffer row stride. Each panel reads its pixels from (x, y) offsets in this framebuffer via per-panel CSRs.
+
+The key constraints: `panel_width` in the YAML must match the bitstream's `columns`, `panel_height` must match `rows`, and the number of chain slots used per output cannot exceed `chain_length`.
 
 ### Example: Two 128x64 panels on J1
 
@@ -428,15 +432,13 @@ J6: 2,1
 ```
 Result: 384x128 virtual display across 6 outputs.
 
-### What happens if layout exceeds bitstream?
+### What can go wrong?
 
-If the layout's virtual size exceeds the bitstream resolution, the DMA
-reads past row boundaries and the display shows garbage. The web GUI
-shows both values so you can verify they match.
+If `panel_width`/`panel_height` in the YAML don't match the bitstream's per-panel size, pixels will be misaligned. If you assign more chain slots per output than `chain_length` allows, the extra panels are ignored. The web GUI shows both the bitstream parameters and the active layout so you can verify they're consistent.
 
 ## Configuration
 
-The system is configured at three levels. The **bitstream** (FPGA) defines the maximum panel size and HUB75 timing — this is fixed at build time. **Firmware constants** must match the bitstream. The **TFTP YAML config** maps physical panels to a virtual display grid — this is loaded at boot and can be changed without rebuilding.
+The system is configured at three levels. The **bitstream** (FPGA) defines the per-panel pixel size, max chain depth, and HUB75 timing — this is fixed at build time. **Firmware constants** must match the bitstream. The **TFTP YAML config** maps physical panels to a virtual display grid — this is loaded at boot and can be changed without rebuilding.
 
 For the default setup (two 128x64 panels on J1 forming a 256x64 display), no build flags are needed — just `./build.sh` and a YAML config file in `.tftp/`.
 

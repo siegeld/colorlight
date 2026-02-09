@@ -162,7 +162,10 @@ physical connectors and defines the virtual display grid:
 - `J1`–`J6`: connector-to-grid mapping with chain slot positions
 
 The virtual display size = `panel_width × grid_cols` by `panel_height × grid_rows`.
-This must not exceed the bitstream's column/row limits.
+The firmware sets the DMA `image_width` CSR to this virtual width, which the gateware
+uses as the framebuffer row stride. Constraints: `panel_width` must match the bitstream's
+`columns`, `panel_height` must match `rows`, and chain slots used per output must not
+exceed `chain_length`.
 
 **Example**: For two 128x64 panels on J1 forming a 256x64 display:
 ```yaml
