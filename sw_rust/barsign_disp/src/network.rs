@@ -449,19 +449,26 @@ pub extern "C" fn network_handler() {
         }
 
         // Handle socket events
-        // All handlers run unconditionally — iface.poll() may process multiple
-        // packets from the FIFO in a single call, so had_udp/had_tcp flags
-        // only reflect the peeked packet, not everything smoltcp consumed.
+        // TCP handlers always run (cheap when idle, needed for responsive HTTP)
         handle_telnet(iface);
         let http_needs_poll = handle_http(iface);
-        handle_dhcp(iface);
-        handle_tftp(iface);
-        handle_artnet(iface);
-        handle_bitmap_smoltcp(iface);
 
-        // Always poll to transmit any queued responses (ACKs, HTTP, etc.)
-        // Handlers may have queued data even without slow-path packets in this batch.
-        iface.poll(time).ok();
+        // UDP handlers + TFTP: run on any slow-path packet, or while TFTP
+        // config is loading (iface.poll may have delivered packets to sockets
+        // during processing of a different packet type in the batch loop)
+        let had_slow_path = had_arp || had_tcp || had_udp;
+        let tftp_active = TFTP_STARTED && !TFTP_LOADER.assume_init_ref().is_done();
+        if had_slow_path || tftp_active {
+            handle_dhcp(iface);
+            handle_tftp(iface);
+            handle_artnet(iface);
+            handle_bitmap_smoltcp(iface);
+        }
+
+        // Poll to transmit queued responses
+        if had_slow_path || http_needs_poll || tftp_active {
+            iface.poll(time).ok();
+        }
 
         crate::ethernet::check_and_reenable_interrupt();
     }

@@ -83,7 +83,7 @@ check_docker_image() {
 }
 
 docker_run() {
-    docker run --rm -v "${SCRIPT_DIR}:/project" ${DOCKER_IMAGE} bash -c "$@"
+    docker run --rm -v "${SCRIPT_DIR}:/project" -e CARGO_HOME=/project/.cargo-cache ${DOCKER_IMAGE} bash -c "$@"
 }
 
 docker_run_usb() {
