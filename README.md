@@ -117,15 +117,28 @@ Panel size is baked into the FPGA bitstream, not runtime-configurable:
 
 #### After Gateware Changes
 
-When you modify `gateware/colorlight.py` (SoC definition), you must regenerate the PAC:
+When you modify `gateware/*.py` files, you need to rebuild the bitstream. Whether you also need to regenerate the PAC depends on what changed:
+
+| Change Type | Command |
+|-------------|---------|
+| CSR registers added/removed/renamed | `./build.sh -p 128x64 bitstream pac firmware` |
+| Peripheral addresses changed | `./build.sh -p 128x64 bitstream pac firmware` |
+| Internal logic only (no new registers) | `./build.sh -p 128x64 bitstream firmware` |
+
+**Safe rule:** Always regenerate PAC when touching gateware. It only takes ~2 seconds and avoids hard-to-debug crashes from mismatched register addresses:
 
 ```bash
-# Rebuild bitstream, regenerate PAC, then rebuild firmware
+# RECOMMENDED: Always do all three together after gateware changes
 ./build.sh -p 128x64 bitstream pac firmware
 
 # Then boot to test
 ./build.sh -p 128x64 boot
+
+# Or do everything in one command
+./build.sh -p 128x64 bitstream pac firmware boot
 ```
+
+> **Warning:** If you rebuild bitstream without PAC after adding a register, the firmware will access wrong memory addresses and crash mysteriously. When in doubt, include `pac`.
 
 #### TFTP Server Management
 
