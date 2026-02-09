@@ -153,7 +153,40 @@ The TFTP server serves `boot.bin` (firmware) and `<mac>.yml` (config) files:
 
 # Check if TFTP server is running
 pgrep -f tftpy
+
+# Bind TFTP server to a specific host IP (auto-detected by default)
+./build.sh --host-ip 192.168.1.100 boot
 ```
+
+#### Changing the TFTP Server Address
+
+There are two TFTP fetches at boot — each uses a different server address:
+
+| Fetch | Client | Default Server | How to Change |
+|-------|--------|----------------|---------------|
+| `boot.bin` (firmware) | BIOS | `10.11.6.65:6969` | Edit `gateware/colorlight.py` line 279, rebuild bitstream |
+| `<mac>.yml` (config) | Firmware | DHCP Option 66, or `10.11.6.65` | Configure your DHCP server |
+
+**To change the BIOS TFTP server:**
+
+1. Edit `gateware/colorlight.py`:
+   ```python
+   remote_ip="192.168.1.100",  # Change from 10.11.6.65
+   ```
+
+2. Rebuild and flash:
+   ```bash
+   ./build.sh -p 128x64 bitstream pac firmware flash
+   ```
+
+**To change the firmware config server:**
+
+Configure your DHCP server to provide Option 66 (TFTP Server Name):
+- **dnsmasq**: `dhcp-option=66,192.168.1.100`
+- **Windows DHCP**: Set Option 066 "Boot Server Host Name"
+- **ISC DHCP**: `option tftp-server-name "192.168.1.100";`
+
+If no Option 66 is provided, firmware falls back to `10.11.6.65`.
 
 #### Test Patterns
 
