@@ -1,6 +1,6 @@
 # Colorlight HUB75 LED Controller
 
-[![Version](https://img.shields.io/badge/version-1.9.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.10.2-brightgreen.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 [![FPGA](https://img.shields.io/badge/FPGA-Lattice%20ECP5-green.svg)](https://www.latticesemi.com/Products/FPGAandCPLD/ECP5)
 [![Board](https://img.shields.io/badge/Board-Colorlight%205A--75E-orange.svg)](http://www.colorlight-led.com/)
@@ -337,9 +337,16 @@ The repo includes pre-built binaries so you can flash and boot without rebuildin
 
 ## Known Issues
 
-- **HTTP/telnet unresponsive during streaming** — While actively receiving bitmap UDP frames, the firmware skips all slow-path processing (HTTP, telnet, DHCP, Art-Net) and discards non-bitmap packets to prevent MAC FIFO overflows on the 40MHz CPU. The board cannot be reached via web browser or telnet during streaming. Services resume within 200ms of the last frame.
 - **Art-Net**: Palette updates work, direct pixel writes commented out
 - **BIOS TFTP**: Uses hardcoded server `10.11.6.65` on non-standard port 6969
+
+## Architecture
+
+As of v1.10.0, the network stack is **fully interrupt-driven**. When Ethernet packets arrive, the VexRiscv ISR fires and processes all network traffic including:
+- Bitmap UDP streaming (fast path - direct pixel writes)
+- DHCP, HTTP, Telnet, Art-Net (via smoltcp)
+
+The main loop handles only display refresh and animations. This eliminates the previous limitation where HTTP/telnet were unresponsive during streaming.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and fixes.
 

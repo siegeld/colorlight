@@ -308,32 +308,40 @@ pub extern "C" fn network_handler() {
             return;
         }
 
-        let time = Instant::from_millis(TIME_MS);
         let iface = IFACE.assume_init_mut();
+        let time = Instant::from_millis(TIME_MS);
+        let mut had_non_bitmap = false;
 
-        // Poll the interface to process packets
-        iface.poll(time).ok();
+        // Process all packets in hardware FIFO
+        loop {
+            let eth = iface.device();
+            match eth.peek_rx() {
+                Some(frame) if is_bitmap_udp(frame) => {
+                    // Bitmap UDP: copy pixels directly (fast path)
+                    process_raw_bitmap(frame);
+                    eth.ack_rx();
+                }
+                Some(_) => {
+                    // Non-bitmap: let smoltcp process it
+                    iface.poll(time).ok();
+                    had_non_bitmap = true;
+                }
+                None => break, // No more packets
+            }
+        }
 
-        // Handle DHCP
-        handle_dhcp(iface);
+        // Only handle sockets if we had non-bitmap packets
+        if had_non_bitmap {
+            handle_dhcp(iface);
+            handle_tftp(iface);
+            handle_telnet(iface);
+            handle_artnet(iface);
+            handle_bitmap_smoltcp(iface); // Drain bitmap packets that went through smoltcp
+            handle_http(iface);
+            iface.poll(time).ok(); // Send any responses
+        }
 
-        // Handle TFTP config loading
-        handle_tftp(iface);
-
-        // Handle Telnet (TCP port 23)
-        handle_telnet(iface);
-
-        // Handle Artnet (UDP port 6454)
-        handle_artnet(iface);
-
-        // Handle Bitmap UDP (port 7000) - process any packets that went through smoltcp
-        handle_bitmap_smoltcp(iface);
-
-        // Handle HTTP (TCP port 80)
-        handle_http(iface);
-
-        // Poll again to send any responses
-        iface.poll(time).ok();
+        crate::ethernet::check_and_reenable_interrupt();
     }
 }
 

@@ -2,7 +2,65 @@
 
 ---
 
+## 2026-02-09
+
+### Interrupt-Driven Network Stack Complete (v1.10.0 → v1.10.2)
+
+**Major milestone:** Entire network stack now runs in ISR context. Main loop does zero network code.
+
+**Architecture:**
+```
+Packet arrives → Interrupt fires → ISR saves all GPRs (128 bytes)
+    → network_handler() called
+    → Loop: peek_rx() each packet in hardware FIFO
+        → Bitmap UDP? → process_raw_bitmap() + ack_rx() (fast path)
+        → Other? → iface.poll() (smoltcp)
+    → If had non-bitmap: handle all sockets (DHCP, HTTP, Telnet, Art-Net)
+    → Re-enable interrupt
+    → ISR restores GPRs, mret
+```
+
+**Key files:**
+- `network.rs` — 1000+ lines, all network state as statics, `network_handler()` ISR entry point
+- `ethernet.rs` — `peek_rx()`, `ack_rx()` for fast packet inspection
+- `main.rs` — Now only does timer tick updates, animation, display refresh
+
+**Bugs fixed:**
+1. **RGB color order (v1.10.1)** — `rgb()` in `patterns.rs` was packing BGR but hardware expects GRB. Also fixed in `bitmap_udp.rs` pixel conversion.
+2. **Missing smoltcp bitmap drain (v1.10.2)** — When non-bitmap packet triggers `iface.poll()`, smoltcp may consume subsequent bitmap packets. Added `handle_bitmap_smoltcp()` to drain these from the UDP socket buffer.
+
+**Performance:**
+- Fast path: ~50μs per bitmap packet (direct SDRAM writes)
+- smoltcp path: ~500μs per packet (full IP/UDP/socket processing)
+- Hardware FIFO: 8 slots, needs drain within 8ms at streaming rates
+
+**HTTP Dashboard:**
+- Dark theme, 15px fonts, 320px min card width
+- Cards: Network, Display, Interrupt Status, Streaming, MAC Diagnostics, Panel Assignments, Controls
+- Test pattern dropdown: grid, rainbow, rainbow_anim, white, red, green, blue
+
+---
+
 ## 2026-02-08
+
+### 19:00 - Trap Handler Debugging Session
+
+**Problem:** Full trap handler with mscratch stack swap crashed at boot.
+
+**Debugging progression:**
+1. Minimal handler (8 bytes, t0/t1 only) → WORKS
+2. Caller-saved registers (72 bytes, ra + t0-t6 + a0-a7) → WORKS
+3. All GPRs (128 bytes, no CSRs, no mscratch) → WORKS
+4. All GPRs + Rust call (poll_rx_to_ring) → WORKS at boot, CRASHES with interrupts enabled
+5. Full TrapFrame with mscratch swap (144 bytes) → CRASHES at boot
+
+**Root cause of crash with Rust call:** Race condition between ISR's `poll_rx_to_ring()` and main loop's `drain_raw_bitmap!` macro. Both access the same hardware registers (ev_pending, slot, length) simultaneously.
+
+**Solution:** Use ISR as wake-up signal only (disable ev_enable), don't drain packets in ISR.
+
+**Current working handler:** 128 bytes (all GPRs), inline ISR logic, no Rust call.
+
+---
 
 ### 18:30 - ETHMAC Interrupt Investigation
 
@@ -16,20 +74,18 @@ Attempted to implement interrupt-driven packet reception to reduce MAC FIFO over
 
 3. **LiteX EventManager is level-triggered** — The `ev_status` register shows real-time packet availability. If you clear `ev_pending` while `ev_status=1`, the pending bit immediately re-sets and interrupt fires again.
 
-4. **Calling Rust code from trap handler crashes** — Even with proper register save/restore, calling `poll_rx_to_ring()` from assembly trap handler crashes the device. Root cause unknown (stack alignment? atomics? race condition?).
+4. **Calling Rust code from trap handler:** Works IF main loop doesn't also access hardware directly. Crashes due to race condition with `drain_raw_bitmap!`.
 
 5. **Interrupt storm from rapid re-enable** — If you re-enable the interrupt while a packet is waiting (`ev_status=1`), it fires immediately causing rapid oscillation. Solution: only re-enable when `ev_status=0`.
 
-**Current Implementation (partial success):**
-- Minimal trap handler: just disables `ev_enable` and returns via `mret`
-- Main loop checks if ISR fired (`ev_enable=0`) and re-enables when idle
+**Current Implementation:**
+- Full-register trap handler (128 bytes, all GPRs) with inline ISR logic
+- ISR disables `ev_enable` as wake-up signal
+- Main loop checks if ISR fired (`ev_enable=0`) and re-enables when `ev_status=0`
 - Device is stable with interrupts enabled
-- ~15% packet loss at max speed (vs polling-only baseline)
+- Still has overflow at max speed (ISR is wake-up only, doesn't drain)
 
-**Why it doesn't actually help much:**
-- The interrupt only serves as a "wake-up signal" — it doesn't drain packets
-- Main loop is already polling constantly via `drain_raw_bitmap`
-- To truly help, the ISR would need to drain to ring buffer, but that crashes
+**To truly reduce overflow:** Would need to change main loop to consume from ring buffer instead of directly from hardware, allowing ISR to drain packets without race condition.
 
 **Relevant addresses:**
 - ETHMAC base: `0xF0001800`

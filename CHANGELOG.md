@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.2] - 2026-02-09
+
+### Fixed
+- **Bitmap packets via smoltcp** — Added missing `handle_bitmap_smoltcp()` call to drain bitmap UDP packets that went through smoltcp when non-bitmap packets triggered `iface.poll()`. Previously, these packets would accumulate in the socket buffer and be lost.
+
+---
+
+## [1.10.1] - 2026-02-09
+
+### Fixed
+- **RGB color order** — Fixed color channel swap in HUB75 output (green showed as red, red as blue, blue as green). Both `patterns.rs` and `bitmap_udp.rs` now correctly pack pixels as GRB (0x00GGRRBB format) to match hardware expectations.
+
+### Changed
+- **Professional HTTP dashboard** — Redesigned web status page with dark theme, larger fonts (15px), wider cards (320px min), and comprehensive diagnostics:
+  - Interrupt Status card showing ISR count, mstatus.MIE, mie.MEIE, IRQ_MASK state
+  - Streaming card with FPS, jitter, frame completion stats
+  - MAC Diagnostics card with overflow, CRC, and preamble error counters
+  - Panel Assignments card showing J1/J2 chain slot mappings
+  - Test pattern controls (grid, rainbow, rainbow_anim, solid colors)
+
+---
+
+## [1.10.0] - 2026-02-09
+
+### Changed
+- **Fully interrupt-driven network stack** — Complete rewrite of network handling. All packet processing now happens in ISR context:
+  - Bitmap UDP packets use fast path (direct pixel writes, ~50μs per packet)
+  - Non-bitmap packets processed via smoltcp (DHCP, HTTP, Telnet, Art-Net)
+  - Main loop does zero network code — only display refresh and animations
+- **Static network state** — All smoltcp state (interface, sockets, buffers) moved to statics for ISR access
+- **Eliminated streaming mode** — HTTP/Telnet now remain responsive during active video streaming
+
+### Added
+- **`network.rs` module** — New 1000+ line module containing:
+  - `network_handler()` — ISR-callable function for all packet processing
+  - `is_bitmap_udp()` — Fast packet classification (5 byte comparisons)
+  - `process_raw_bitmap()` — Direct pixel writes bypassing smoltcp
+  - All HTTP handlers moved from `http.rs`
+- **ISR count tracking** — Assembly trap handler increments counter at 0x40020000, visible in web UI
+
+### Technical Notes
+- ISR saves all 31 GPRs (128 bytes) before calling Rust code
+- Interrupt re-enabled at end of handler after draining hardware FIFO
+- Fast path processes bitmap UDP in ~50μs vs ~500μs through smoltcp
+
+---
+
 ## [1.9.2] - 2026-02-08
 
 ### Changed
@@ -403,6 +450,11 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.10.2 | 2026-02-09 | Fix bitmap packets going through smoltcp |
+| 1.10.1 | 2026-02-09 | Fix RGB color order, professional HTTP dashboard |
+| 1.10.0 | 2026-02-09 | Fully interrupt-driven network stack |
+| 1.9.2 | 2026-02-08 | CPU variant "lite" for interrupt support |
+| 1.9.1 | 2026-02-08 | Test pattern timing fix, include bitstreams |
 | 1.9.0 | 2026-02-08 | Pre-clock-domain checkpoint (no functional changes) |
 | 1.8.2 | 2026-01-28 | Boot grace period: 10s delay before streaming can block network init |
 | 1.8.1 | 2026-01-28 | Version display in grid test pattern |
