@@ -4,6 +4,42 @@
 
 ## 2026-02-09
 
+### MAC Overflow Fix (v1.10.3)
+
+**Problem:** Video streaming showed jitter and frame drops despite ISR-driven architecture. Debug counters revealed:
+- `max_batch: 3094` — ISR processed 3094 packets in ONE call, blocking everything
+- `slow_udp: 23` — NetBIOS broadcasts going through slow smoltcp path
+- `mcast_dropped: 354` — VRRP multicast already being filtered
+
+**Root causes identified via debug counters:**
+
+1. **No ISR batch limit** — Loop processed ALL packets until hardware FIFO empty. When packets arrived continuously, ISR never exited, starving the display refresh.
+
+2. **Multicast going slow path** — VRRP (protocol 112) packets correctly rejected by `is_bitmap_udp()` but still processed by smoltcp, taking ~500μs each.
+
+3. **Unwanted UDP broadcasts** — NetBIOS (port 138), mDNS, etc. going through smoltcp instead of being dropped.
+
+**Fixes implemented:**
+
+1. **ISR batch limit** — `MAX_PACKETS_PER_ISR = 64` breaks out of loop to prevent starvation
+
+2. **Multicast filter** — `is_multicast()` drops packets with dst MAC `01:xx:xx:xx:xx:xx` (but allows broadcast `ff:ff:ff:ff:ff:ff` for DHCP)
+
+3. **Unwanted UDP filter** — `is_unwanted_udp()` drops UDP except ports 7000 (bitmap), 6454 (artnet), 67/68 (DHCP), 69 (TFTP)
+
+4. **Debug counters** — Added `slow_arp`, `slow_tcp`, `slow_udp`, `slow_other` breakdown to identify traffic sources
+
+**Results:**
+| Metric | Before | After |
+|--------|--------|-------|
+| max_batch | 3094 | 6 |
+| frames_dropped | 2562 | 9 |
+| mac_overflow | 1718 | 71 |
+
+**Key insight:** The captured slow_path packet (`slow_pkt` in stats) showed VRRP multicast from router 10.11.6.252 — network noise, not bitmap traffic. Filtering this at the fast path level eliminated the smoltcp overhead.
+
+---
+
 ### Interrupt-Driven Network Stack Complete (v1.10.0 → v1.10.2)
 
 **Major milestone:** Entire network stack now runs in ISR context. Main loop does zero network code.

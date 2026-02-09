@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.3] - 2026-02-09
+
+### Fixed
+- **MAC overflow during streaming** — Fixed multiple issues causing packet loss during video streaming:
+  - Added ISR batch limit (64 packets max) to prevent interrupt starvation when packets arrive faster than processing
+  - Filter out multicast packets (VRRP, mDNS) in fast path instead of slow smoltcp processing
+  - Filter out unwanted UDP broadcasts (NetBIOS port 138, etc.) - only keep ports 7000, 6454, 67/68, 69
+  - Fixed `is_bitmap_udp()` to handle variable IP header length (IHL field)
+
+### Added
+- **Slow path traffic breakdown** — Debug counters now show packet type breakdown: `slow_arp`, `slow_tcp`, `slow_udp`, `slow_other`
+- **Multicast drop counter** — Tracks dropped multicast/unwanted UDP packets in `mcast_dropped`
+- **HTTP dashboard diagnostics** — MAC Diagnostics card now shows slow path breakdown and multicast drop count
+
+---
+
 ## [1.10.2] - 2026-02-09
 
 ### Fixed
@@ -450,6 +466,7 @@ First stable release. All core features working and tested.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.10.3 | 2026-02-09 | Fix MAC overflow: ISR batch limit, filter multicast/unwanted UDP |
 | 1.10.2 | 2026-02-09 | Fix bitmap packets going through smoltcp |
 | 1.10.1 | 2026-02-09 | Fix RGB color order, professional HTTP dashboard |
 | 1.10.0 | 2026-02-09 | Fully interrupt-driven network stack |

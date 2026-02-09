@@ -102,6 +102,23 @@ static mut IAC_STATE: u8 = 0;
 static mut TIME_MS: i64 = 0;
 static mut LAST_BITMAP_PACKET_MS: i64 = 0;
 
+// Debug counters for diagnosing packet routing
+static mut DBG_FAST_PATH: u32 = 0;      // Packets via is_bitmap_udp() fast path
+static mut DBG_SLOW_PATH: u32 = 0;      // Packets via smoltcp slow path
+static mut DBG_ISR_MAX_BATCH: u32 = 0;  // Max packets processed in single ISR
+
+// Capture first slow-path packet header for debugging
+static mut DBG_SLOW_PKT: [u8; 64] = [0; 64];  // First 64 bytes of slow-path packet
+static mut DBG_SLOW_PKT_LEN: usize = 0;       // Actual length captured
+static mut DBG_SLOW_PKT_CAPTURED: bool = false;
+static mut DBG_MULTICAST_DROPPED: u32 = 0;    // Multicast packets dropped
+
+// Slow path traffic breakdown
+static mut DBG_SLOW_ARP: u32 = 0;
+static mut DBG_SLOW_TCP: u32 = 0;
+static mut DBG_SLOW_UDP: u32 = 0;
+static mut DBG_SLOW_OTHER: u32 = 0;
+
 // ============================================================================
 // Timer-based accurate timing
 // ============================================================================
@@ -313,6 +330,12 @@ pub fn mac_errors() -> (u32, u32, u32) {
     }
 }
 
+/// Get debug counters for packet routing diagnostics.
+/// Returns (fast_path, slow_path, max_batch).
+pub fn debug_counters() -> (u32, u32, u32) {
+    unsafe { (DBG_FAST_PATH, DBG_SLOW_PATH, DBG_ISR_MAX_BATCH) }
+}
+
 /// Get IP address for HTTP status page.
 pub fn ip_addr() -> [u8; 4] {
     unsafe {
@@ -354,23 +377,71 @@ pub extern "C" fn network_handler() {
         let iface = IFACE.assume_init_mut();
         let time = Instant::from_millis(TIME_MS);
         let mut had_non_bitmap = false;
+        let mut batch_count = 0u32;
 
-        // Process all packets in hardware FIFO
+        // Process packets in hardware FIFO (limit to prevent ISR starvation)
+        const MAX_PACKETS_PER_ISR: u32 = 64;
         loop {
+            if batch_count >= MAX_PACKETS_PER_ISR { break; }
             let eth = iface.device();
             match eth.peek_rx() {
                 Some(frame) if is_bitmap_udp(frame) => {
                     // Bitmap UDP: process directly (fast path)
+                    DBG_FAST_PATH += 1;
+                    batch_count += 1;
                     process_raw_bitmap(frame);
                     eth.ack_rx();
                 }
-                Some(_) => {
-                    // Non-bitmap: let smoltcp process
+                Some(frame) if is_multicast(frame) => {
+                    // Drop multicast packets (VRRP, mDNS, etc.) - we don't need them
+                    DBG_MULTICAST_DROPPED += 1;
+                    batch_count += 1;
+                    eth.ack_rx();
+                }
+                Some(frame) if is_unwanted_udp(frame) => {
+                    // Drop UDP packets we don't need (NetBIOS, mDNS, etc.)
+                    DBG_MULTICAST_DROPPED += 1;  // Reuse counter for all dropped
+                    batch_count += 1;
+                    eth.ack_rx();
+                }
+                Some(frame) => {
+                    // Non-bitmap: let smoltcp process (ARP, HTTP, etc.)
+                    DBG_SLOW_PATH += 1;
+                    batch_count += 1;
+
+                    // Count by packet type
+                    if frame.len() >= 14 {
+                        let ethertype = ((frame[12] as u16) << 8) | frame[13] as u16;
+                        match ethertype {
+                            0x0806 => DBG_SLOW_ARP += 1,
+                            0x0800 if frame.len() >= 24 => {
+                                match frame[23] {
+                                    6 => DBG_SLOW_TCP += 1,
+                                    17 => DBG_SLOW_UDP += 1,
+                                    _ => DBG_SLOW_OTHER += 1,
+                                }
+                            }
+                            _ => DBG_SLOW_OTHER += 1,
+                        }
+                    }
+
+                    // Capture first slow-path packet after streaming starts (for debugging)
+                    if !DBG_SLOW_PKT_CAPTURED && DBG_FAST_PATH > 100 {
+                        let copy_len = frame.len().min(64);
+                        DBG_SLOW_PKT[..copy_len].copy_from_slice(&frame[..copy_len]);
+                        DBG_SLOW_PKT_LEN = frame.len();
+                        DBG_SLOW_PKT_CAPTURED = true;
+                    }
                     iface.poll(time).ok();
                     had_non_bitmap = true;
                 }
                 None => break,
             }
+        }
+
+        // Track max batch size for diagnostics
+        if batch_count > DBG_ISR_MAX_BATCH {
+            DBG_ISR_MAX_BATCH = batch_count;
         }
 
         // Handle socket events if we had non-bitmap packets
@@ -792,16 +863,26 @@ a{{color:#7090d0;text-decoration:none}}\
         if stats.jitter_ms > 10 { "warn" } else { "" }, stats.jitter_ms).ok();
 
     // MAC Diagnostics card
+    let (dbg_fast, dbg_slow, dbg_batch) = debug_counters();
     write!(resp, "<div class=c><h2>MAC Diagnostics</h2><table>\
 <tr><td>RX Overflow</td><td class='{}'>{}</td></tr>\
 <tr><td>CRC Errors</td><td class='{}'>{}</td></tr>\
 <tr><td>Preamble Errors</td><td class='{}'>{}</td></tr>\
 <tr><td>Ring Overflow</td><td class='{}'>{}</td></tr>\
+<tr><td>Fast Path</td><td class='ok'>{}</td></tr>\
+<tr><td>Slow Path</td><td class='{}'>{} <span style='color:#5a5a6a'>(arp:{} tcp:{} udp:{} other:{})</span></td></tr>\
+<tr><td>Multicast Drop</td><td>{}</td></tr>\
+<tr><td>Max Batch</td><td class='{}'>{}</td></tr>\
 </table></div>",
         if mac_ovf > 0 { "err" } else { "" }, mac_ovf,
         if mac_crc > 0 { "err" } else { "" }, mac_crc,
         if mac_pre > 0 { "warn" } else { "" }, mac_pre,
-        if ring_ovf > 0 { "err" } else { "" }, ring_ovf).ok();
+        if ring_ovf > 0 { "err" } else { "" }, ring_ovf,
+        dbg_fast,
+        if dbg_slow > 0 { "warn" } else { "" }, dbg_slow,
+        DBG_SLOW_ARP, DBG_SLOW_TCP, DBG_SLOW_UDP, DBG_SLOW_OTHER,
+        DBG_MULTICAST_DROPPED,
+        if dbg_batch > 8 { "warn" } else { "" }, dbg_batch).ok();
 
     // Panels card - only show J1 and J2 (first 2 outputs, 2 chain slots each)
     write!(resp, "<div class=c><h2>Panel Assignments</h2><table>").ok();
@@ -881,6 +962,11 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
     write!(resp, r#""panel_width":{},"panel_height":{},"#, layout.panel_width, layout.panel_height).ok();
     write!(resp, r#""animation":"{}","bitmap_frames":{},"#, anim, stats.frames_completed).ok();
     write!(resp, r#""isr_count":{},"isr_driven":true,"#, isr_count).ok();
+    let (dbg_fast, dbg_slow, dbg_batch) = debug_counters();
+    write!(resp, r#""fast_path":{},"slow_path":{},"max_batch":{},"#, dbg_fast, dbg_slow, dbg_batch).ok();
+    write!(resp, r#""slow_arp":{},"slow_tcp":{},"slow_udp":{},"slow_other":{},"#,
+        DBG_SLOW_ARP, DBG_SLOW_TCP, DBG_SLOW_UDP, DBG_SLOW_OTHER).ok();
+    write!(resp, r#""mcast_dropped":{},"#, DBG_MULTICAST_DROPPED).ok();
     write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{}}}"#,
         mac_ovf, mac_crc, mac_pre).ok();
 }
@@ -950,6 +1036,7 @@ unsafe fn api_bitmap_stats(resp: &mut HttpResponse) {
         IFACE.assume_init_ref().device().mac_errors()
     } else { (0, 0, 0) };
     let ring_ovf = crate::ethernet::ring_overflow_count();
+    let (dbg_fast, dbg_slow, dbg_batch) = debug_counters();
 
     write!(resp, r#"{{"packets_total":{},"packets_valid":{},"#, stats.packets_total, stats.packets_valid).ok();
     write!(resp, r#""bad_magic":{},"bad_header":{},"#, stats.packets_bad_magic, stats.packets_bad_header).ok();
@@ -963,6 +1050,20 @@ unsafe fn api_bitmap_stats(resp: &mut HttpResponse) {
         stats.last_width, stats.last_height, stats.last_data_len).ok();
     write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{},"ring_overflow":{},"#,
         mac_ovf, mac_crc, mac_pre, ring_ovf).ok();
+    write!(resp, r#""fast_path":{},"slow_path":{},"max_batch":{},"mcast_dropped":{},"#,
+        dbg_fast, dbg_slow, dbg_batch, DBG_MULTICAST_DROPPED).ok();
+    write!(resp, r#""slow_arp":{},"slow_tcp":{},"slow_udp":{},"slow_other":{},"#,
+        DBG_SLOW_ARP, DBG_SLOW_TCP, DBG_SLOW_UDP, DBG_SLOW_OTHER).ok();
+
+    // Include captured slow-path packet if available
+    if DBG_SLOW_PKT_CAPTURED {
+        write!(resp, r#""slow_pkt_len":{},"slow_pkt":""#, DBG_SLOW_PKT_LEN).ok();
+        for i in 0..64.min(DBG_SLOW_PKT_LEN) {
+            write!(resp, "{:02x}", DBG_SLOW_PKT[i]).ok();
+        }
+        write!(resp, r#"","#).ok();
+    }
+
     write!(resp, r#""isr_count":{},"mtvec":"0x{:08x}","trap_addr":"0x{:08x}","time_ms":{}}}"#,
         crate::ethernet::isr_count(), crate::ethernet::debug_mtvec(), crate::ethernet::trap_addr(), TIME_MS).ok();
 }
@@ -1088,15 +1189,75 @@ fn json_get_str<'a>(json: &'a str, key: &str) -> Option<&'a str> {
 // Raw fast path for bitmap UDP
 // ============================================================================
 
+/// Check if a frame is multicast but NOT broadcast.
+/// Multicast: first byte LSB is 1 (01:xx:xx:xx:xx:xx)
+/// Broadcast: all ff (ff:ff:ff:ff:ff:ff) - we need this for DHCP
+#[inline]
+pub fn is_multicast(frame: &[u8]) -> bool {
+    if frame.len() < 6 { return false; }
+    // Check multicast bit
+    if (frame[0] & 0x01) == 0 { return false; }
+    // Allow broadcast through (needed for DHCP)
+    if frame[0] == 0xff && frame[1] == 0xff && frame[2] == 0xff
+        && frame[3] == 0xff && frame[4] == 0xff && frame[5] == 0xff {
+        return false;
+    }
+    true  // It's multicast but not broadcast - drop it
+}
+
+/// Check if frame is UDP but not a port we care about.
+/// We keep: 7000 (bitmap), 6454 (artnet), 67/68 (DHCP), 69 (TFTP)
+#[inline]
+pub fn is_unwanted_udp(frame: &[u8]) -> bool {
+    if frame.len() < 44 { return false; }
+    // EtherType IPv4
+    if frame[12] != 0x08 || frame[13] != 0x00 { return false; }
+    // Protocol UDP
+    if frame[23] != 17 { return false; }
+    // Get destination port (assuming IHL=5 for simplicity, offset 36-37)
+    let dst_port = ((frame[36] as u16) << 8) | frame[37] as u16;
+    // Keep these ports, drop everything else
+    !matches!(dst_port, 7000 | 6454 | 67 | 68 | 69)
+}
+
+/// Check if frame is an ARP request not for us (can be dropped during streaming)
+#[inline]
+pub fn is_arp_not_for_us(frame: &[u8], our_ip: [u8; 4]) -> bool {
+    if frame.len() < 42 { return false; }
+    // EtherType ARP = 0x0806
+    if frame[12] != 0x08 || frame[13] != 0x06 { return false; }
+    // ARP operation: 1 = request
+    if frame[20] != 0x00 || frame[21] != 0x01 { return false; }
+    // Target IP is at offset 38-41
+    frame[38] != our_ip[0] || frame[39] != our_ip[1]
+        || frame[40] != our_ip[2] || frame[41] != our_ip[3]
+}
+
 /// Check if a raw Ethernet frame is a UDP packet destined for the bitmap port (7000).
-/// Layout: Ethernet(14) + IPv4(20, IHL=5) + UDP(8) = 42-byte header.
+/// Handles variable IP header length (IHL field).
 #[inline]
 pub fn is_bitmap_udp(frame: &[u8]) -> bool {
-    frame.len() >= 52 // 42 header + 10 bitmap header min
-        && frame[12] == 0x08 && frame[13] == 0x00 // EtherType: IPv4
-        && frame[14] & 0x0F == 5                   // IHL: 5 (no options)
-        && frame[23] == 17                          // Protocol: UDP
-        && frame[36] == 0x1B && frame[37] == 0x58   // UDP dst port: 7000
+    // Min: eth(14) + ip(20) + udp(8) + bitmap header(10) = 52 bytes
+    if frame.len() < 52 { return false; }
+
+    // EtherType: IPv4
+    if frame[12] != 0x08 || frame[13] != 0x00 { return false; }
+
+    // Get IP header length (IHL field, in 32-bit words)
+    let ihl = (frame[14] & 0x0F) as usize;
+    if ihl < 5 { return false; }  // IHL must be at least 5 (20 bytes)
+    let ip_header_len = ihl * 4;
+    let udp_offset = 14 + ip_header_len;  // Ethernet header + IP header
+
+    // Check we have enough bytes for UDP header + bitmap header
+    if frame.len() < udp_offset + 18 { return false; }  // +8 UDP + 10 bitmap header
+
+    // Protocol: UDP (at fixed offset 23 in IP header - 14 eth + 9)
+    if frame[23] != 17 { return false; }
+
+    // UDP destination port at variable offset (UDP header bytes 2-3)
+    let port = u16::from_be_bytes([frame[udp_offset + 2], frame[udp_offset + 3]]);
+    port == 7000
 }
 
 /// Process a raw bitmap UDP packet from hardware.
@@ -1113,8 +1274,11 @@ pub fn process_raw_bitmap(frame: &[u8]) -> bool {
         let hub75 = &mut *HUB75_PTR;
         let bitmap_rx = BITMAP_RX.assume_init_mut();
 
-        // Skip Ethernet(14) + IP(20) + UDP(8) = 42 byte header
-        let complete = bitmap_rx.process_packet(&frame[42..], hub75, TIME_MS);
+        // Calculate UDP payload offset with variable IP header length
+        let ihl = (frame[14] & 0x0F) as usize;
+        let ip_header_len = ihl * 4;
+        let udp_offset = 14 + ip_header_len + 8;  // Ethernet + IP + UDP header
+        let complete = bitmap_rx.process_packet(&frame[udp_offset..], hub75, TIME_MS);
 
         // Only do expensive operations on frame completion
         if complete {
