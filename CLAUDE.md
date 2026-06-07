@@ -24,8 +24,8 @@ how many panels are actually used and where they appear in the virtual display.
 
 - **Device IP**: 10.11.6.72 (via DHCP)
 - **Bitstream**: 128x64, chain_length=2, 6 outputs (default build)
-- **Physical panels**: Two 128x64 panels daisy-chained on J1
-- **Virtual display**: 256x64 (2x1 grid, configured via TFTP YAML)
+- **Physical panels**: Four 128x64 panels in a 2x2 grid (J1: top row, J2: bottom row)
+- **Virtual display**: 256x128 (configured via TFTP YAML)
 - **Prebuilt bitstreams**: `bitstreams/` directory (128x64.bit, 96x48.bit, etc.)
 
 ## Build Commands
