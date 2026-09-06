@@ -12,6 +12,7 @@ import argparse
 import logging
 import os
 import signal
+import socket
 import sys
 
 import tftpy
@@ -39,27 +40,56 @@ def main():
     # tftpy uses the 'tftpy' logger
     logging.getLogger("tftpy").setLevel(logging.INFO)
 
-    # Write PID file
+    # Probe the port before claiming success. tftpy's listen() blocks, so there
+    # is no post-bind hook to log from -- without this, a bind failure still
+    # printed "TFTP server listening" and then died silently, which reads as a
+    # mystery instead of as EADDRINUSE. A stale daemon holding this port once
+    # cost real debugging time, and worse, it went on serving an old boot.bin.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.bind((args.host, args.port))
+    except OSError as exc:
+        logging.error("cannot bind %s:%d - %s", args.host, args.port, exc)
+        logging.error("something else is already serving this port; "
+                      "check for an older tftpd.py (ss -ulpn | grep %d)", args.port)
+        sys.exit(1)
+    finally:
+        probe.close()
+
+    # Write PID file only once we know we can actually serve.
     if args.pid:
         with open(args.pid, "w") as f:
             f.write(str(os.getpid()))
 
-    def cleanup(signum, frame):
+    def remove_pidfile():
         if args.pid and os.path.exists(args.pid):
             os.remove(args.pid)
+
+    def cleanup(signum, frame):
+        remove_pidfile()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, cleanup)
     signal.signal(signal.SIGINT, cleanup)
 
     server = tftpy.TftpServer(args.root)
-    logging.info("TFTP server listening on %s:%d, root=%s", args.host, args.port, args.root)
+    # Log the absolute root: which TREE is being served is exactly the detail
+    # that hid a daemon serving a stale boot.bin out of a deprecated checkout.
+    logging.info("TFTP server listening on %s:%d, root=%s (pid %d)",
+                 args.host, args.port, os.path.abspath(args.root), os.getpid())
+    status = 0
     try:
         server.listen(args.host, args.port)
     except KeyboardInterrupt:
         pass
+    except Exception as exc:
+        # Previously the finally: cleanup() below exited 0 on ANY failure, so a
+        # dead server looked like a clean shutdown to anything checking status.
+        logging.error("TFTP server stopped: %s", exc)
+        status = 1
     finally:
-        cleanup(None, None)
+        remove_pidfile()
+    sys.exit(status)
 
 
 if __name__ == "__main__":

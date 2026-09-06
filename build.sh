@@ -228,6 +228,32 @@ check_bitstream_fresh() {
     fi
 }
 
+# Refuse to serve or flash a boot.bin older than the firmware sources.
+#
+# Same failure mode as a stale bitstream, and it has bitten this project: a
+# TFTP daemon spent 210 days serving a months-old boot.bin, so the board booted
+# firmware nobody had built recently while the logs looked entirely normal.
+# Nothing about a stale binary announces itself -- it just quietly serves.
+check_firmware_fresh() {
+    local bin="${TFTP_DIR}/boot.bin"
+    [[ -f "${bin}" ]] || return 0
+    local newer
+    newer=$(find "${SCRIPT_DIR}/sw_rust/barsign_disp/src" \
+                 "${SCRIPT_DIR}/sw_rust/barsign_disp/Cargo.toml" \
+                 -newer "${bin}" -print -quit 2>/dev/null)
+    if [[ -n "${newer}" ]]; then
+        if [[ "${ALLOW_STALE}" == "1" ]]; then
+            print_warning "boot.bin is STALE (older than ${newer#${SCRIPT_DIR}/}) - continuing due to --allow-stale"
+            return 0
+        fi
+        print_error "boot.bin is older than the firmware sources"
+        print_error "  binary: .tftp/boot.bin"
+        print_error "  newer:  ${newer#${SCRIPT_DIR}/}"
+        print_warning "Run './build.sh firmware' first (or pass --allow-stale to override)"
+        exit 1
+    fi
+}
+
 program_sram() {
     print_header "Programming FPGA (SRAM - Temporary)"
     check_docker_image
@@ -308,6 +334,8 @@ program_flash_firmware() {
     # --skip-reset leaves the running design alone: newly written firmware takes
     # effect on the next reset, so pushing firmware on its own does not blank
     # the display mid-write.
+    check_firmware_fresh
+
     print_step "Flashing .tftp/boot.bin to SPI flash at chip offset ${FLASH_BOOT_OFFSET}"
     print_warning "This will persist across power cycles"
 
@@ -352,6 +380,7 @@ detect_host_ip() {
 }
 
 ensure_tftp() {
+    check_firmware_fresh
     # Already running — nothing to do
     if is_tftp_running; then
         local pid=$(cat "${TFTP_DIR}/tftpd.pid" 2>/dev/null)
@@ -484,7 +513,8 @@ TARGETS:
     flash-all       Both of the above -- what standalone (no-TFTP) boot needs
 
   'sram', 'flash' and 'flash-all' refuse to program a bitstream older than
-  gateware/*.py. Pass --allow-stale to override.
+  gateware/*.py, and anything that serves or flashes .tftp/boot.bin refuses one
+  older than sw_rust/barsign_disp/. Pass --allow-stale to override either.
     boot            Combined: program SRAM + ensure TFTP server
     start           Start TFTP server (if not already running)
     stop            Stop the background TFTP server
