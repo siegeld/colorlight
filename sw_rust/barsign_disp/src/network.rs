@@ -640,9 +640,8 @@ unsafe fn handle_bitmap_smoltcp(iface: &mut Interface<'static, Eth>) {
 
     while let Ok((data, _endpoint)) = socket.recv() {
         LAST_BITMAP_PACKET_MS = TIME_MS;
-        let complete = bitmap_rx.process_packet(data, hub75, TIME_MS);
-        if complete {
-            hub75.swap_buffers();
+        let presented = bitmap_rx.process_packet(data, hub75, TIME_MS);
+        if presented {
             hub75.set_mode(crate::hub75::OutputMode::FullColor);
             hub75.on();
             if !ANIMATION_PTR.is_null() {
@@ -893,12 +892,18 @@ a{{color:#7090d0;text-decoration:none}}\
 <tr><td>Dropped</td><td class='{}'>{}</td></tr>\
 <tr><td>FPS</td><td>{} <span style='color:#5a5a6a'>({}ms avg)</span></td></tr>\
 <tr><td>Jitter</td><td class='{}'>{}ms</td></tr>\
+<tr><td>Stale-flushed</td><td class='{}'>{}</td></tr>\
+<tr><td>Chunks repaired</td><td class='{}'>{}</td></tr>\
+<tr><td>Duplicates</td><td>{}</td></tr>\
 </table></div>",
         stats.frames_completed,
         if stats.frames_partial > 0 { "warn" } else { "" }, stats.frames_partial,
         if stats.frames_dropped > 0 { "err" } else { "" }, stats.frames_dropped,
         fps, avg,
-        if stats.jitter_ms > 10 { "warn" } else { "" }, stats.jitter_ms).ok();
+        if stats.jitter_ms > 10 { "warn" } else { "" }, stats.jitter_ms,
+        if stats.frames_stale > 0 { "warn" } else { "" }, stats.frames_stale,
+        if stats.chunks_repaired > 0 { "warn" } else { "" }, stats.chunks_repaired,
+        stats.packets_duplicate).ok();
 
     // MAC Diagnostics card
     let (dbg_fast, dbg_slow, dbg_batch) = debug_counters();
@@ -1078,9 +1083,12 @@ unsafe fn api_bitmap_stats(resp: &mut HttpResponse) {
     let (dbg_fast, dbg_slow, dbg_batch) = debug_counters();
 
     write!(resp, r#"{{"packets_total":{},"packets_valid":{},"#, stats.packets_total, stats.packets_valid).ok();
-    write!(resp, r#""bad_magic":{},"bad_header":{},"#, stats.packets_bad_magic, stats.packets_bad_header).ok();
+    write!(resp, r#""bad_magic":{},"bad_header":{},"duplicate":{},"#,
+        stats.packets_bad_magic, stats.packets_bad_header, stats.packets_duplicate).ok();
     write!(resp, r#""frames_completed":{},"frames_partial":{},"frames_dropped":{},"#,
         stats.frames_completed, stats.frames_partial, stats.frames_dropped).ok();
+    write!(resp, r#""frames_stale":{},"chunks_repaired":{},"last_missing":{},"#,
+        stats.frames_stale, stats.chunks_repaired, stats.last_missing).ok();
     write!(resp, r#""fps":{},"frame_interval_ms":{},"avg_interval_ms":{},"jitter_ms":{},"#,
         fps, stats.frame_interval_ms, stats.avg_interval_ms, stats.jitter_ms).ok();
     write!(resp, r#""last_frame_id":{},"#, stats.last_frame_id).ok();
@@ -1304,6 +1312,49 @@ pub fn is_bitmap_udp(frame: &[u8]) -> bool {
     port == 7000
 }
 
+/// Run `f` with machine interrupts masked, restoring the previous state.
+///
+/// Needed wherever the main loop touches state the ISR owns: all network
+/// processing runs inside the trap handler, so anything shared is effectively
+/// concurrent.
+#[inline]
+unsafe fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
+    let prev: u32;
+    core::arch::asm!("csrrci {}, mstatus, 0b1000", out(reg) prev);
+    let result = f();
+    if prev & 0x8 != 0 {
+        core::arch::asm!("csrrsi x0, mstatus, 0b1000");
+    }
+    result
+}
+
+/// Present an in-progress bitmap frame that has gone quiet.
+///
+/// Called from the main loop. The ISR can only finish a frame when a packet
+/// arrives, so without this a frame whose tail was lost -- or simply the last
+/// frame before a sender stops -- never reaches the panel.
+pub fn bitmap_tick() {
+    unsafe {
+        if HUB75_PTR.is_null() || !IFACE_INITIALIZED {
+            return;
+        }
+        without_interrupts(|| {
+            let hub75 = &mut *HUB75_PTR;
+            let bitmap_rx = BITMAP_RX.assume_init_mut();
+            if bitmap_rx.tick(hub75, TIME_MS) {
+                hub75.set_mode(crate::hub75::OutputMode::FullColor);
+                hub75.on();
+                if !ANIMATION_PTR.is_null() {
+                    *ANIMATION_PTR = crate::menu::Animation::None;
+                }
+            }
+            if !BITMAP_STATS_PTR.is_null() {
+                *BITMAP_STATS_PTR = bitmap_rx.stats;
+            }
+        });
+    }
+}
+
 /// Process a raw bitmap UDP packet from hardware.
 /// Called from ISR for the fast path.
 pub fn process_raw_bitmap(frame: &[u8]) -> bool {
@@ -1322,21 +1373,27 @@ pub fn process_raw_bitmap(frame: &[u8]) -> bool {
         let ihl = (frame[14] & 0x0F) as usize;
         let ip_header_len = ihl * 4;
         let udp_offset = 14 + ip_header_len + 8;  // Ethernet + IP + UDP header
-        let complete = bitmap_rx.process_packet(&frame[udp_offset..], hub75, TIME_MS);
+        // The receiver owns the swap now: it patches missing chunks from the
+        // displayed buffer first, so presenting can happen on completion, on
+        // the next frame starting, or on a staleness deadline.
+        let presented = bitmap_rx.process_packet(&frame[udp_offset..], hub75, TIME_MS);
 
-        // Only do expensive operations on frame completion
-        if complete {
-            hub75.swap_buffers();
+        if presented {
             hub75.set_mode(crate::hub75::OutputMode::FullColor);
             hub75.on();
             if !ANIMATION_PTR.is_null() {
                 *ANIMATION_PTR = crate::menu::Animation::None;
             }
-            if !BITMAP_STATS_PTR.is_null() {
-                *BITMAP_STATS_PTR = bitmap_rx.stats;
-            }
         }
 
-        complete
+        // Publish unconditionally. This used to sit inside `if complete`, which
+        // froze the published counters whenever frames stopped completing --
+        // exactly the regime bad_magic / bad_header / frames_dropped exist to
+        // diagnose.
+        if !BITMAP_STATS_PTR.is_null() {
+            *BITMAP_STATS_PTR = bitmap_rx.stats;
+        }
+
+        presented
     }
 }

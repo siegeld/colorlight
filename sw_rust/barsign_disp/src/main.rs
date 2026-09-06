@@ -274,6 +274,13 @@ fn main() -> ! {
         // Check if ISR fired and re-enable when idle
         ethernet::check_and_reenable_interrupt();
 
+        // Flush a bitmap frame that has gone quiet. The ISR can only finish a
+        // frame when a packet arrives, so a frame whose tail was lost (or the
+        // last frame before the sender stops) needs presenting from here.
+        if timer_tick {
+            network::bitmap_tick();
+        }
+
         // Skip processing on non-timer ticks or when streaming
         let streaming = network::is_streaming();
         if !timer_tick || (time_ms % 5 != 0) {

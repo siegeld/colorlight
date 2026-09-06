@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.8] - 2026-09-06
+
+Streaming reliability and throughput. All measurements from
+`tools/bench_stream.py` against the live panel; see `CLAUDE.md` for the baseline.
+
+### Fixed
+- **A lost packet no longer stalls the frame.** The receiver tracked progress
+  with a counter and declared a frame complete when the packet carrying the
+  *last* chunk index arrived. Measured: omitting only chunk 67 of 68 left
+  **0 of 10 frames completing** — the frame reached the panel late via the
+  partial-swap path or not at all, so loss froze the display rather than
+  degrading it. `BitmapReceiver` now records *which* chunks arrived in a
+  256-bit mask and completes on the mask being full, so nothing depends on one
+  specific packet.
+- **A lost packet no longer shows a two-frame-old band.** Chunks that never
+  arrived are now patched from the displayed buffer before the swap
+  (`Hub75::repair_from_front`), so a gap is one frame stale instead of two.
+  Bounded to 8 chunks per frame (~3.4 ms of ISR time); a frame missing more
+  than that is dropped and the previous frame stays up. Every presented frame
+  therefore has each chunk either freshly written or patched, so a partial
+  frame cannot leave stale data behind for a later frame to inherit.
+- **A frame is presented when the stream goes quiet.** `bitmap_tick()` runs
+  from the main loop and flushes an in-progress frame after 250 ms of silence.
+  Previously the ISR could only finish a frame when a packet arrived, so the
+  last frame before a sender stopped hung indefinitely.
+- **A malformed packet no longer reboots the board.** `total_chunks` was a
+  `u8` validated only against `chunk_index`, never against the frame size, so
+  `chunk_index * 487` could index past the framebuffer — and the resulting
+  panic issues `soc_rst`. One UDP packet to port 7000 with
+  `total_chunks=255, chunk_index=200` was enough. Indices between 68 and 134
+  did not panic but silently corrupted the other buffer through an underflowing
+  `self.length - offset`. Now bounded against the configured image length.
+- **Stats no longer freeze when frames stop completing.** The snapshot copy to
+  `BITMAP_STATS_PTR` sat inside `if complete`, so `bad_magic`, `bad_header` and
+  `frames_dropped` were unreadable in exactly the failure regime they exist to
+  diagnose. Published unconditionally now.
+- **Duplicate and reordered chunks no longer corrupt the arrival count** — they
+  are detected via the mask, counted separately, and skipped rather than
+  rewritten.
+
+### Changed
+- **Payload is read 32 bits at a time** (`Hub75::write_img_rgb888`). This SoC's
+  VexRiscv_Lite has an I-cache but no D-cache, so every access is a full bus
+  round-trip; the byte-at-a-time RGB unpack cost 4 of them per pixel (3 loads +
+  1 store, ~17 cycles each, ~67 cycles/pixel total — which is exactly the
+  measured ~600,000 px/s ceiling). Four pixels are twelve bytes, so the
+  word-wise form issues 3 loads + 4 stores per 4 pixels instead of 12 + 4.
+  The alignment this needs always holds: eth(14) + ip(4*IHL) + udp(8) +
+  header(10) is a multiple of 4 for every legal IHL, inside a 2048-aligned MAC
+  slot. Output is bit-identical to the old path, verified exhaustively across
+  every chunk length including the short final chunk.
+- **The test sender paces against an absolute deadline** instead of calling
+  `time.sleep()` per packet, which drifts — a requested 0.8 ms delivered ~0.95 ms
+  and the error compounded across a frame. Default spacing is now 0.8 ms
+  (~1250 pkt/s, the measured limit) rather than 10 ms.
+
+### Added
+- `tools/bench_stream.py` — throughput sweep, per-pixel-vs-per-packet cost
+  isolation, and single-chunk-loss behaviour, with the v1.10.6 baseline
+  recorded in the script header.
+- New counters on `/api/bitmap/stats` and the dashboard: `duplicate`,
+  `frames_stale`, `chunks_repaired`, `last_missing`.
+
+### Known
+- Untested on hardware. The gateware bitstream and this firmware both need a
+  build and flash from dogwood (10.11.6.65); the panel is still running v1.10.6.
+
+---
+
 ## [1.10.7] - 2026-09-06
 
 ### Fixed

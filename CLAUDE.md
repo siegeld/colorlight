@@ -54,11 +54,37 @@ how many panels are actually used and where they appear in the virtual display.
 ## Test Patterns
 
 ```bash
-# Single pattern (256 width = two 128-wide panels side by side)
-python3 tools/send_test_pattern.py gradient --host 10.11.6.72 --width 256 --height 64 --delay 0.1
+# Single pattern — the virtual display is 256x128 (2x2 grid of 128x64 panels)
+python3 tools/send_test_pattern.py gradient --host 10.11.6.72 --width 256 --height 128
 
 # Smoke test (cycles all patterns forever)
-python3 tools/send_test_pattern.py --smoke --host 10.11.6.72 --width 256 --height 64 --delay 0.1
+python3 tools/send_test_pattern.py --smoke --host 10.11.6.72 --width 256 --height 128
+
+# Throughput / loss measurement — see the baseline table in the script header
+python3 tools/bench_stream.py --host 10.11.6.72 sweep
 ```
 
-**Important**: At 40MHz, `--delay 0.1` is required to avoid banding.
+**Send rate**: the sender paces itself and defaults to 0.8 ms between packets
+(~1250 pkt/s), which is the measured limit. Don't pass `--delay` unless you are
+deliberately testing — the old `--delay 0.1` advice was 125x more conservative
+than the hardware needs and drops you to ~0.15 fps.
+
+## Streaming performance — measured, not assumed
+
+The bottleneck is the CPU pixel loop, not the network. Numbers from
+`tools/bench_stream.py` on v1.10.6, worth re-checking after any change here:
+
+- **~600,000 px/s hard ceiling** — flat regardless of how hard you push. At
+  256x128 that is 18 fps absolute, ~15.6 fps clean.
+- **Cause**: VexRiscv_Lite has an I-cache but *no D-cache*
+  (`cpu_variant="lite"`), so every access is a bare bus round-trip. The old
+  byte-at-a-time RGB unpack cost 4 of them per pixel (3 loads + 1 store) at
+  ~17 cycles each. v1.10.8 reads the payload 32 bits at a time — 3 loads + 4
+  stores per 4 pixels instead of 12 + 4.
+- Going meaningfully past ~40 fps needs the pixels off the CPU entirely: a
+  `LiteDRAMDMAWriter` fed from a LiteEth UDP port. Note the display DMA already
+  reads the whole framebuffer every refresh and is close to SDRAM-bandwidth
+  bound, so write DMA trades refresh rate for frame rate.
+- The framebuffer is 65,536 words per buffer — **exactly** 8 panels of 128x64,
+  with no headroom. The bitstream can drive 12, which would not fit. There is
+  spare SDRAM in the framebuffer region if that needs raising.
