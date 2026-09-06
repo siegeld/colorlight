@@ -29,6 +29,7 @@ FIRMWARE_BIN="${FIRMWARE_DIR}/target/riscv32i-unknown-none-elf/release/barsign-d
 TFTP_DIR="${SCRIPT_DIR}/.tftp"
 # Must match FLASH_BOOT_ADDRESS in gateware/colorlight.py (spiflash origin + 0x100000)
 FLASH_BOOT_OFFSET="0x100000"
+ALLOW_STALE=0
 HOST_IP=""
 
 # Colors for output
@@ -205,6 +206,28 @@ build_pac() {
     print_success "PAC regenerated in sw_rust/litex-pac/src/"
 }
 
+# Refuse to program a bitstream older than the gateware that defines it.
+#
+# get_bitstream_path() only checks that the file EXISTS, so a failed or skipped
+# build leaves the previous bitstream in place and 'sram'/'flash' will load it
+# without complaint -- which silently tests, and can persist, the wrong SoC.
+check_bitstream_fresh() {
+    local bit="$1"
+    local newer
+    newer=$(find "${SCRIPT_DIR}/gateware" -name '*.py' -newer "${bit}" -print -quit 2>/dev/null)
+    if [[ -n "${newer}" ]]; then
+        if [[ "${ALLOW_STALE}" == "1" ]]; then
+            print_warning "Bitstream is STALE (older than ${newer#${SCRIPT_DIR}/}) - continuing due to --allow-stale"
+            return 0
+        fi
+        print_error "Bitstream is older than the gateware that defines it"
+        print_error "  bitstream: ${bit#${SCRIPT_DIR}/}"
+        print_error "  newer:     ${newer#${SCRIPT_DIR}/}"
+        print_warning "Run './build.sh bitstream' first (or pass --allow-stale to override)"
+        exit 1
+    fi
+}
+
 program_sram() {
     print_header "Programming FPGA (SRAM - Temporary)"
     check_docker_image
@@ -215,6 +238,8 @@ program_sram() {
         print_warning "Run './build.sh bitstream' or './build.sh build-all' first"
         exit 1
     fi
+
+    check_bitstream_fresh "${bit}"
 
     local rel_bit="${bit#${SCRIPT_DIR}/}"
     print_step "Loading ${rel_bit} to SRAM via ${CABLE} (panel: ${PANEL})"
@@ -250,6 +275,8 @@ program_flash() {
         print_warning "Run './build.sh bitstream' or './build.sh build-all' first"
         exit 1
     fi
+
+    check_bitstream_fresh "${bit}"
 
     local rel_bit="${bit#${SCRIPT_DIR}/}"
     print_step "Flashing ${rel_bit} to SPI flash via ${CABLE} (panel: ${PANEL})"
@@ -455,6 +482,9 @@ TARGETS:
     flash           Write BITSTREAM to SPI flash via JTAG (persistent, uses --panel)
     flash-firmware  Write FIRMWARE (.tftp/boot.bin) to SPI flash at FLASH_BOOT_ADDRESS
     flash-all       Both of the above -- what standalone (no-TFTP) boot needs
+
+  'sram', 'flash' and 'flash-all' refuse to program a bitstream older than
+  gateware/*.py. Pass --allow-stale to override.
     boot            Combined: program SRAM + ensure TFTP server
     start           Start TFTP server (if not already running)
     stop            Stop the background TFTP server
@@ -572,6 +602,10 @@ while [[ $# -gt 0 ]]; do
         -c|--cable)
             CABLE="$2"
             shift 2
+            ;;
+        --allow-stale)
+            ALLOW_STALE=1
+            shift
             ;;
         --host-ip)
             HOST_IP="$2"

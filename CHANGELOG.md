@@ -85,9 +85,12 @@ Streaming reliability and throughput. All measurements from
   instantiates `W25Q32JV`.
   - Both parts share the `READ_1_1_1` opcode, a 256-byte page and 8 dummy bits, so
     `SPIFLASH_PAGE_SIZE` is unchanged and only the mapped size differs.
-  - The SPI flash region grows 2MB → 4MB (`0x80200000`–`0x80600000`), still clear of
-    EthMAC at `0x80000000` and CSR at `0xF0000000`.
-  - `FLASH_BOOT_ADDRESS` remains `0x80300000`.
+  - The SPI flash region grows 2MB → 4MB and its origin moves to `0x80400000`
+    (spanning `0x80400000`–`0x80800000`): LiteX requires a region's origin be
+    aligned to its size, and the old `0x80200000` was chosen for the 2MB part.
+    Clear of EthMAC at `0x80000000` and main_ram_uncached at `0x90000000`.
+  - `FLASH_BOOT_ADDRESS` follows the origin to `0x80500000`, but the **chip**
+    offset it maps to is unchanged at `0x100000`.
   - **Requires a bitstream rebuild and a flash write** — gateware, not firmware:
     `./build.sh bitstream pac firmware` then `./build.sh flash`.
 - **Dashboard reported a phantom interrupt fault** — the status page always showed

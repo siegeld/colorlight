@@ -65,8 +65,8 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | SRAM | 0x10000000 | 8KB | Stack/heap |
 | Main RAM | 0x40000000 | 4MB | SDRAM, firmware runs here |
 | EthMAC | 0x80000000 | 20KB | 8 RX + 2 TX slots × 2KB each |
-| SPI Flash | 0x80200000 | 4MB | Memory-mapped flash (W25Q32JV) |
-| Flash Boot | 0x80300000 | - | Firmware load address |
+| SPI Flash | 0x80400000 | 4MB | Memory-mapped flash (W25Q32JV) |
+| Flash Boot | 0x80500000 | - | Firmware load address (chip offset 0x100000) |
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
 
 ## HUB75 Double Buffering
@@ -226,8 +226,13 @@ the BIOS fell through to network boot.
 
 **Fix:** `gateware/colorlight.py` now instantiates `W25Q32JV`. Both parts share the
 `READ_1_1_1` opcode, a 256-byte page and 8 dummy bits, so only the size changes: the
-mapped region grows from 2MB to 4MB (`0x80200000`-`0x80600000`, still clear of CSR at
-`0xF0000000`) and `FLASH_BOOT_ADDRESS` stays at `0x80300000`.
+mapped region grows from 2MB to 4MB. The origin has to move with it: LiteX requires a
+region's origin be aligned to its size (`SoCRegion.decoder()` raises `SoCError` otherwise),
+and `0x80200000` was picked for the 2MB part -- `0x80200000 % 0x400000 == 0x200000`. The
+region is now `0x80400000`-`0x80800000`, clear of ethmac at `0x80000000` and of
+main_ram_uncached at `0x90000000`, and `FLASH_BOOT_ADDRESS` follows it to `0x80500000`.
+The **chip** offset that address maps to is unchanged at `0x100000`, so how the firmware
+is written to flash does not change.
 
 **Requires a bitstream rebuild and a flash write** — this is gateware, not firmware:
 

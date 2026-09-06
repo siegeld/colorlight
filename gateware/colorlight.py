@@ -174,10 +174,16 @@ class BaseSoC(SoCCore):
         )
         self.add_csr("spiflash_mmap")
         self.add_csr("spiflash_phy")
-        # Place spiflash at 0x80200000 (2MB aligned) to leave room for ethmac at 0x80000000.
-        # 4MB flash spans 0x80200000-0x80600000; next region is CSR at 0xF0000000.
+        # LiteX requires a region's origin to be aligned to its size
+        # (SoCRegion.decoder(): `origin & (size_pow2 - 1)` must be 0, else SoCError).
+        # The old 0x80200000 origin was chosen for the 2MB GD25Q16 and is NOT 4MB
+        # aligned, so it must move with the part: 0x80200000 % 0x400000 == 0x200000.
+        # 0x80400000 leaves room for ethmac at 0x80000000 (20KB) and the 4MB flash
+        # spans 0x80400000-0x80800000; next region is main_ram_uncached at 0x90000000.
+        # FLASH_BOOT_ADDRESS follows the origin, but the CHIP offset it maps to is
+        # unchanged at 0x100000, so nothing about flashing the firmware changes.
         spiflash_region = SoCRegion(
-            origin=0x80200000,
+            origin=0x80400000,
             size=flash.total_size,
             cached=False,
         )
