@@ -24,11 +24,17 @@ const MASK_WORDS: usize = MAX_CHUNKS / 64;
 /// Missing chunks patched from the front buffer before presenting a frame.
 ///
 /// Each patch is a `PIXELS_PER_CHUNK` SDRAM-to-SDRAM copy -- roughly 0.4 ms on
-/// this core -- and runs in the ISR. Eight is ~3.4 ms worst case, which fits
-/// inside the MAC's 8 slots of buffering at any sanely paced send rate. A frame
-/// missing more than this is too damaged to be worth showing, so it is dropped
-/// and the previous frame stays up.
-const MAX_REPAIR_CHUNKS: u16 = 8;
+/// this core -- and it runs in the ISR, which makes this the one place the loss
+/// handling spends time exactly when the system is already behind: packets keep
+/// arriving during the patch, so an over-generous budget under heavy loss feeds
+/// back into more loss. Two caps it below a millisecond.
+///
+/// Two is also the threshold the pre-v1.10.8 code already used -- it swapped a
+/// partial frame when `chunks_count >= total - 2` -- so nothing that used to
+/// reach the panel stops reaching it. The difference is that those two chunks
+/// are now patched rather than left showing a two-frame-old band. A frame
+/// missing more is dropped and the previous frame stays up, as before.
+const MAX_REPAIR_CHUNKS: u16 = 2;
 
 /// Present an in-progress frame if nothing has arrived for it in this long.
 ///

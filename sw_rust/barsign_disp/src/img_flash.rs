@@ -2,7 +2,20 @@ use crate::hal;
 use litex_pac as pac;
 use spi_memory::{prelude::*, series25::Flash as Flash25};
 
-static FLASH_SIZE: usize = (16 / 8) * 1024 * 1024;
+/// Base of the memory-mapped SPI flash window.
+///
+/// MUST match the spiflash SoCRegion origin in gateware/colorlight.py. This was
+/// hardcoded to 0x80000000, which stopped being the flash window a long time ago
+/// -- that address is the EthMAC buffer region, so read_byte()/read_image() were
+/// aimed at the wrong peripheral (and 0x80180000, where read_image() started, is
+/// mapped to nothing at all).
+const MMAP_BASE: usize = 0x8040_0000;
+
+/// W25Q32JV: 32 Mbit = 4MB. Was 2MB, sized for the GD25Q16 that the gateware
+/// used to declare; it drives img_offset below, so understating it put stored
+/// images at 0x180000 -- only 512KB above the firmware at 0x100000, close enough
+/// that a growing boot.bin would eventually be erased by write_image().
+static FLASH_SIZE: usize = (32 / 8) * 1024 * 1024;
 static SECTOR_SIZE: usize = 4 * 1024;
 pub struct Flash {
     memory: Flash25<hal::SpiMem, hal::SpiCS>,
@@ -17,7 +30,7 @@ impl Flash {
 
     pub fn read_byte(&mut self, offset: usize) -> u8 {
         let eeprom =
-            unsafe { core::slice::from_raw_parts_mut((0x80000000) as *mut u8, 0x00200000) };
+            unsafe { core::slice::from_raw_parts_mut(MMAP_BASE as *mut u8, FLASH_SIZE) };
         eeprom[offset]
     }
 
@@ -71,7 +84,10 @@ impl Flash {
         let img_offset = (FLASH_SIZE / 4) * 3;
         // Small hack
         unsafe {
-            core::slice::from_raw_parts((0x80000000 + img_offset) as *const u8, 0x00200000 / 4)
+            core::slice::from_raw_parts(
+                (MMAP_BASE + img_offset) as *const u8,
+                FLASH_SIZE - img_offset,
+            )
         }
     }
 }

@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.9] - 2026-09-06
+
+### Fixed
+- **`img_flash` addressed the wrong peripheral.** `read_byte()` and
+  `read_image()` hardcoded a `0x80000000` mmap base with a 2MB span. That
+  address is the EthMAC buffer region, not the flash window, and has been wrong
+  since the spiflash region moved out of it — `read_image()` built a 512KB slice
+  at `0x80180000`, which is mapped to nothing in either the old or new memory
+  map, and it runs on every boot from `main.rs:174`. Now uses a named
+  `MMAP_BASE` documented as having to track the gateware.
+- **`FLASH_SIZE` was 2MB**, sized for the GD25Q16 the gateware no longer
+  declares. It drives `img_offset = (FLASH_SIZE / 4) * 3`, so stored images sat
+  at `0x180000` — only 512KB above the firmware at `0x100000`, with `boot.bin`
+  already 218KB, close enough that a growing firmware would eventually be erased
+  by `write_image()`. At the correct 4MB the image store moves to `0x300000` and
+  headroom goes from 300KB to 1.8MB.
+  (Both found by the jupiter session while reviewing my claim that no firmware
+  source referenced the flash addresses. It did; my grep was too narrow.)
+
+### Changed
+- **Repair budget cut from 8 chunks to 2.** Patching missing chunks runs in the
+  ISR, which makes it the one part of the loss handling that spends time exactly
+  when the system is already behind — packets keep arriving during the patch, so
+  an over-generous budget under heavy loss feeds back into more loss. Two caps it
+  under a millisecond, and it is the same threshold the pre-v1.10.8 code used
+  (`chunks_count >= total - 2`), so nothing that used to reach the panel stops
+  reaching it; those chunks are simply patched now instead of showing a
+  two-frame-old band.
+
+### Known
+- Still untested on hardware. v1.10.8 has never completed a clean bench run: the
+  one attempt crashed the board mid-test, on a rig with a long-standing JTAG
+  fault, and the cause has not been isolated to firmware or hardware.
+
+---
+
 ## [1.10.8] - 2026-09-06
 
 Streaming reliability and throughput. All measurements from
