@@ -806,7 +806,12 @@ unsafe fn page_status(resp: &mut HttpResponse, ip: [u8; 4]) {
     core::arch::asm!("csrr {}, mstatus", out(reg) mstatus);
     core::arch::asm!("csrr {}, mie", out(reg) mie);
     core::arch::asm!("csrr {}, 0xBC0", out(reg) irq_mask);
-    let mie_enabled = (mstatus & 0x8) != 0;
+    // This page is rendered from inside the trap handler (all network processing
+    // runs in the ISR), where hardware has already cleared mstatus.MIE on trap
+    // entry. Reading MIE here therefore always yields 0 and looks like a fault.
+    // The pre-trap value is preserved in mstatus.MPIE (bit 7) — that is the bit
+    // that actually says whether interrupts are enabled.
+    let mie_enabled = (mstatus & 0x80) != 0;
     let meie_enabled = (mie & 0x800) != 0;
     let ethmac_masked = (irq_mask & 0x4) != 0;
 
@@ -871,7 +876,7 @@ a{{color:#7090d0;text-decoration:none}}\
     // Interrupt Status card
     write!(resp, "<div class=c><h2>Interrupt Status</h2><table>\
 <tr><td>ISR Count</td><td class='{}'>{}</td></tr>\
-<tr><td>mstatus.MIE</td><td class='{}'>{}</td></tr>\
+<tr><td>mstatus.MPIE</td><td class='{}'>{}</td></tr>\
 <tr><td>mie.MEIE</td><td class='{}'>{}</td></tr>\
 <tr><td>IRQ_MASK[2]</td><td class='{}'>{}</td></tr>\
 <tr><td>Mode</td><td class='ok'>ISR-driven</td></tr>\

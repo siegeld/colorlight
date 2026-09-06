@@ -371,7 +371,7 @@ Connect via `telnet <ip> 23` to access the management console:
 | ROM | 0x00000000 | 64KB | BIOS |
 | SRAM | 0x10000000 | 8KB | Stack/heap |
 | Main RAM | 0x40000000 | 4MB | SDRAM |
-| SPI Flash | 0x80200000 | 2MB | Bitstream + firmware |
+| SPI Flash | 0x80200000 | 4MB | Bitstream + firmware (W25Q32JV) |
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
 
 ## Multi-Panel Approaches

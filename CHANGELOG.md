@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.7] - 2026-09-06
+
+### Fixed
+- **Flash boot on rev 8.2 boards** — `gateware/colorlight.py` declared a `GD25Q16`
+  (2MB GigaDevice) while rev 8.2 hardware carries a **W25Q32JV** (4MB Winbond). The
+  SPI flash never enumerated, so the BIOS always fell through to TFTP network boot and
+  the board could not survive a power cycle without a TFTP server running. Now
+  instantiates `W25Q32JV`.
+  - Both parts share the `READ_1_1_1` opcode, a 256-byte page and 8 dummy bits, so
+    `SPIFLASH_PAGE_SIZE` is unchanged and only the mapped size differs.
+  - The SPI flash region grows 2MB → 4MB (`0x80200000`–`0x80600000`), still clear of
+    EthMAC at `0x80000000` and CSR at `0xF0000000`.
+  - `FLASH_BOOT_ADDRESS` remains `0x80300000`.
+  - **Requires a bitstream rebuild and a flash write** — gateware, not firmware:
+    `./build.sh bitstream pac firmware` then `./build.sh flash`.
+- **Dashboard reported a phantom interrupt fault** — the status page always showed
+  `mstatus.MIE` as a red "disabled". The page is rendered from inside the trap handler
+  (all network processing runs in the ISR), where hardware has already cleared `MIE` on
+  trap entry, so that bit could never read as set. Now reports `mstatus.MPIE` (bit 7),
+  which preserves the pre-trap value and is the bit that actually indicates whether
+  interrupts are enabled.
+
+### Documentation
+- Memory map in `ARCH.md` and `README.md` updated to 4MB SPI flash.
+- The "Flash Boot Fails (rev 8.2)" known issue in `ARCH.md` rewritten as fixed, with
+  the rebuild-and-flash procedure.
+- Panel configuration docs clarified: per-panel size vs virtual display size, and the
+  current test setup as a 2x2 grid of four 128x64 panels on J1+J2 (256x128 virtual).
+
+### Repository
+- Project relocated to `/share/src/colorlight` per the non-container-code convention.
+- Stale `fastclock` branch and its worktree removed (fully merged; its uncommitted
+  `--delay` work was already superseded by `--delay`/`--smoke` on `main`).
+- Fixed `HEAD` in the canonical bare repo (`nfsrbr1:/home/git/colorlight.git`), which
+  pointed at a nonexistent `refs/heads/master` and made every fresh clone fail.
+
+---
+
+## [1.10.6] - 2026-02-09
+
+### Fixed
+- **TFTP config loading reliability** — boot config now loads 100% of the time:
+  - Removed the `had_udp` gate on `handle_tftp()` — `iface.poll()` can process multiple
+    packets internally, so the peeked-packet classification flags don't always reflect
+    what smoltcp actually consumed.
+  - Fixed `socket.close()` dropping a queued ACK by deferring the close to the next ISR
+    call, after `iface.poll()` has transmitted it.
+  - Added port 6900 (TFTP client) to the `is_unwanted_udp` allowed list.
+  - Fixed `is_unwanted_udp()` to use the variable IHL field instead of assuming IHL=5.
+- **Fallback panel size** — default panel geometry is now read from the bitstream CSRs
+  instead of a hardcoded 96x48, so the fallback layout matches the actual hardware.
+- **Streaming regression from the above** — making all socket handlers and `iface.poll()`
+  unconditional cost 25K+ dropped frames during streaming. TCP handlers (telnet, HTTP)
+  stay unconditional for responsiveness; UDP handlers are gated on
+  `had_slow_path || tftp_active`, and `iface.poll()` on
+  `had_slow_path || http_needs_poll || tftp_active`.
+
+### Changed
+- Cargo cache persisted across Docker builds via `CARGO_HOME`, so dependencies are not
+  re-fetched when GitHub is unreachable.
+
+### Documentation
+- `ARCH.md` main-loop section rewritten for the ISR-driven architecture; boot sequence
+  documented; three-layer configuration model (bitstream / firmware / YAML) clarified.
+- Corrected 256x64 references — the default build is 128x64 with `chain_length=2`, not
+  a single 256x64 panel.
+
+---
+
 ## [1.10.5] - 2026-02-09
 
 ### Fixed

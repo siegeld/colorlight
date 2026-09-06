@@ -1,5 +1,11 @@
 # AI Development Hints
 
+- **Canonical checkout is `/share/src/colorlight`** (NFS, same path on every host —
+  this is device firmware, it does not ship as a container image). The old
+  `/u/siegeld/colorlight` tree is superseded; don't edit there.
+- **Bitstream builds and flashing need dogwood (10.11.6.65)** — it holds the
+  USB-Blaster and the `litex-hub75` Docker image, and it is the only host on the
+  device's 10.11.6.0/24 segment, so it is also where `./build.sh boot` serves TFTP.
 - Read [README.md](README.md) for project docs, build commands, and usage
 - Read [ARCH.md](ARCH.md) for internals: memory map, double buffering, ISR design, key files
 - All builds go through `./build.sh` — run `./build.sh --help` for options

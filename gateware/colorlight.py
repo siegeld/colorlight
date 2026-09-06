@@ -46,7 +46,7 @@ from liteeth.common import *
 
 from litex.build.generic_platform import Subsignal, Pins, Misc, IOStandard
 
-from litespi.modules import GD25Q16
+from litespi.modules import W25Q32JV
 from litespi.opcodes import SpiNorFlashOpCodes as Codes
 from litespi.phy.generic import LiteSPIPHY
 from litespi import LiteSPI
@@ -161,8 +161,9 @@ class BaseSoC(SoCCore):
             # uart_name="crossover+bridge",
             uart_baudrate=115200,
         )
-        # Spi Flash TODO Only for v6.1, replace with W25Q32JV for later
-        flash = GD25Q16(Codes.READ_1_1_1)
+        # SPI Flash: rev 8.2 boards carry a Winbond W25Q32JV (4MB).
+        # (Older v6.1 boards used a GD25Q16 (2MB) — swap the module back for those.)
+        flash = W25Q32JV(Codes.READ_1_1_1)
         self.submodules.spiflash_phy = LiteSPIPHY(
             pads=platform.request("spiflash"), flash=flash, device=platform.device
         )
@@ -173,7 +174,8 @@ class BaseSoC(SoCCore):
         )
         self.add_csr("spiflash_mmap")
         self.add_csr("spiflash_phy")
-        # Place spiflash at 0x80200000 (2MB aligned) to leave room for ethmac at 0x80000000
+        # Place spiflash at 0x80200000 (2MB aligned) to leave room for ethmac at 0x80000000.
+        # 4MB flash spans 0x80200000-0x80600000; next region is CSR at 0xF0000000.
         spiflash_region = SoCRegion(
             origin=0x80200000,
             size=flash.total_size,

@@ -20,7 +20,7 @@
 │         ▼                ▼                     ▼             │
 │  ┌───────────┐    ┌───────────┐         ┌───────────┐       │
 │  │   SDRAM   │    │ SPI Flash │         │   CSRs    │       │
-│  │   4MB     │    │    2MB    │         │           │       │
+│  │   4MB     │    │    4MB    │         │           │       │
 │  └───────────┘    └───────────┘         └───────────┘       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -65,7 +65,7 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | SRAM | 0x10000000 | 8KB | Stack/heap |
 | Main RAM | 0x40000000 | 4MB | SDRAM, firmware runs here |
 | EthMAC | 0x80000000 | 20KB | 8 RX + 2 TX slots × 2KB each |
-| SPI Flash | 0x80200000 | 2MB | Memory-mapped flash |
+| SPI Flash | 0x80200000 | 4MB | Memory-mapped flash (W25Q32JV) |
 | Flash Boot | 0x80300000 | - | Firmware load address |
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
 
@@ -215,15 +215,26 @@ typically completes within 1–2 seconds of DHCP completion.
 
 ## Known Issues & Solutions
 
-### Flash Boot Fails (rev 8.2)
+### Flash Boot Fails (rev 8.2) — FIXED in v1.10.7
 
-**Symptom:** BIOS sends TFTP requests for `boot.bin` instead of loading from flash.
+**Symptom:** BIOS sends TFTP requests for `boot.bin` instead of loading from flash,
+so the board only comes up while a TFTP server is running and dies on a power cycle.
 
-**Cause:** `gateware/colorlight.py` defines `GD25Q16` flash but rev 8.2 uses W25Q32JV.
+**Cause:** `gateware/colorlight.py` declared a `GD25Q16` (2MB GigaDevice) while rev 8.2
+boards carry a **W25Q32JV** (4MB Winbond). The SPI flash never enumerated correctly, so
+the BIOS fell through to network boot.
 
-**Workaround:** Use TFTP boot (see README).
+**Fix:** `gateware/colorlight.py` now instantiates `W25Q32JV`. Both parts share the
+`READ_1_1_1` opcode, a 256-byte page and 8 dummy bits, so only the size changes: the
+mapped region grows from 2MB to 4MB (`0x80200000`-`0x80600000`, still clear of CSR at
+`0xF0000000`) and `FLASH_BOOT_ADDRESS` stays at `0x80300000`.
 
-**Fix:** Update flash chip in `gateware/colorlight.py`: `GD25Q16` -> `W25Q32JV`.
+**Requires a bitstream rebuild and a flash write** — this is gateware, not firmware:
+
+```bash
+./build.sh bitstream pac firmware   # regenerate (PAC must precede firmware)
+./build.sh flash                    # write bitstream to SPI flash (needs USB-Blaster)
+```
 
 ### TCP Connection Timeout
 
