@@ -27,6 +27,8 @@ BITSTREAM="${BUILD_DIR}/gateware/colorlight_5a_75e.bit"
 FIRMWARE_DIR="sw_rust/barsign_disp"
 FIRMWARE_BIN="${FIRMWARE_DIR}/target/riscv32i-unknown-none-elf/release/barsign-disp"
 TFTP_DIR="${SCRIPT_DIR}/.tftp"
+# Must match FLASH_BOOT_ADDRESS in gateware/colorlight.py (spiflash origin + 0x100000)
+FLASH_BOOT_OFFSET="0x100000"
 HOST_IP=""
 
 # Colors for output
@@ -258,6 +260,37 @@ program_flash() {
     print_success "Bitstream written to flash"
 }
 
+program_flash_firmware() {
+    print_header "Programming firmware (Flash - Persistent)"
+    check_docker_image
+
+    local bin="${TFTP_DIR}/boot.bin"
+    if [[ ! -f "${bin}" ]]; then
+        print_error "No firmware binary at .tftp/boot.bin"
+        print_warning "Run './build.sh firmware' first"
+        exit 1
+    fi
+
+    # gateware/colorlight.py sets FLASH_BOOT_ADDRESS to the spiflash region
+    # origin + 0x100000, so the BIOS looks for the firmware 1MB into the chip --
+    # clear of the bitstream, which lives at offset 0. 'flash' writes only the
+    # bitstream; standalone boot needs both, so this writes the other half.
+    # --offset is an offset into the FLASH CHIP (0x100000), not the CPU bus
+    # address (0x80200000 + 0x100000) that FLASH_BOOT_ADDRESS reports.
+    # --file-type stops openFPGALoader inferring a bitstream from the extension.
+    # --skip-reset leaves the running design alone: newly written firmware takes
+    # effect on the next reset, so pushing firmware on its own does not blank
+    # the display mid-write.
+    print_step "Flashing .tftp/boot.bin to SPI flash at chip offset ${FLASH_BOOT_OFFSET}"
+    print_warning "This will persist across power cycles"
+
+    docker_run_usb "openFPGALoader --board colorlight --cable ${CABLE} \
+        -f --unprotect-flash --skip-reset --verify \
+        --file-type raw --offset ${FLASH_BOOT_OFFSET} /project/.tftp/boot.bin"
+
+    print_success "Firmware written to flash at ${FLASH_BOOT_OFFSET}"
+}
+
 is_tftp_running() {
     if [[ -f "${TFTP_DIR}/tftpd.pid" ]]; then
         local pid=$(cat "${TFTP_DIR}/tftpd.pid" 2>/dev/null)
@@ -419,7 +452,9 @@ TARGETS:
     firmware        Build the Rust firmware
     pac             Regenerate the Peripheral Access Crate (after SoC changes)
     sram            Program FPGA via JTAG (temporary, uses --panel to select bitstream)
-    flash           Program FPGA via JTAG (persistent, uses --panel to select bitstream)
+    flash           Write BITSTREAM to SPI flash via JTAG (persistent, uses --panel)
+    flash-firmware  Write FIRMWARE (.tftp/boot.bin) to SPI flash at FLASH_BOOT_ADDRESS
+    flash-all       Both of the above -- what standalone (no-TFTP) boot needs
     boot            Combined: program SRAM + ensure TFTP server
     start           Start TFTP server (if not already running)
     stop            Stop the background TFTP server
@@ -483,8 +518,10 @@ WORKFLOW:
     3. Full rebuild and test:
        ./build.sh all boot
 
-    4. Deploy to flash (once flash boot is fixed):
-       ./build.sh flash
+    4. Deploy for standalone boot (no TFTP server needed at power-on):
+       ./build.sh flash-all
+       # 'flash' alone writes only the bitstream; the BIOS also needs the
+       # firmware at FLASH_BOOT_ADDRESS, which is what flash-firmware writes.
 
     5. After modifying gateware/colorlight.py (SoC changes):
        ./build.sh bitstream pac firmware
@@ -607,6 +644,15 @@ for target in "${TARGETS[@]}"; do
             ;;
         flash|program)
             program_flash
+            ;;
+        flash-firmware)
+            program_flash_firmware
+            ;;
+        flash-all)
+            # Bitstream FIRST: writing it may erase sectors beyond its own
+            # length, which would take the firmware at 0x100000 with it.
+            program_flash
+            program_flash_firmware
             ;;
         tftp|serve|start)
             do_start

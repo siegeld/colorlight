@@ -3,9 +3,15 @@
 - **Canonical checkout is `/share/src/colorlight`** (NFS, same path on every host —
   this is device firmware, it does not ship as a container image). The old
   `/u/siegeld/colorlight` tree is superseded; don't edit there.
-- **Bitstream builds and flashing need dogwood (10.11.6.65)** — it holds the
-  USB-Blaster and the `litex-hub75` Docker image, and it is the only host on the
-  device's 10.11.6.0/24 segment, so it is also where `./build.sh boot` serves TFTP.
+- **Bitstream builds and flashing happen on `jupiter`** — it holds the USB-Blaster
+  (Altera 09fb:6001) and the `litex-hub75` image, and its second NIC is the
+  10.11.6.65 leg on the panel's segment, so it is also where `./build.sh boot`
+  serves TFTP (matching the panel's DHCP option 66).
+  **DNS trap:** a reverse lookup of 10.11.6.65 answers `dogwood.siegel.com`, but
+  that PTR is stale — `dogwood` forward-resolves to 10.1.1.149, a different host
+  at another site. jupiter has no A record for its 10.11.6.65 leg; `jupiter`
+  resolves to its *other* NIC, 10.11.7.60. Don't name the flash host from the
+  reverse lookup.
 - Read [README.md](README.md) for project docs, build commands, and usage
 - Read [ARCH.md](ARCH.md) for internals: memory map, double buffering, ISR design, key files
 - All builds go through `./build.sh` — run `./build.sh --help` for options

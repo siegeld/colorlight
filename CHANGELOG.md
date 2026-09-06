@@ -70,7 +70,8 @@ Streaming reliability and throughput. All measurements from
 
 ### Known
 - Untested on hardware. The gateware bitstream and this firmware both need a
-  build and flash from dogwood (10.11.6.65); the panel is still running v1.10.6.
+  build and flash from `jupiter` (the USB-Blaster host, 10.11.6.65 leg); the
+  panel is still running v1.10.6.
 
 ---
 
