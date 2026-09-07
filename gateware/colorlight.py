@@ -338,7 +338,14 @@ class BaseSoC(SoCCore):
         # Pixels off the CPU: hardware writes the streamed payload straight to
         # SDRAM. Defaults to DISABLED so the ethernet restructure above can be
         # validated on its own before hardware writes are switched on.
-        self.submodules.pixdma = Hub75UdpDma(self.sdram, ethmac.udp_source)
+        # fb_base is the single source of truth for which half is on screen;
+        # the DMA derives the other half from it, so one CSR write flips both.
+        self.submodules.pixdma = Hub75UdpDma(
+            self.sdram, ethmac.udp_source,
+            display_base=self.hub75.fb_base.storage,
+            fb_base=hub75.sdram_offset,
+            half_words=0x00400000 // 2 // 4 // 2,
+        )
         self.add_csr("pixdma")
 
         # TODO: broadcast TFTP not working yet — needs ETH_UDP_BROADCAST + BIOS patch

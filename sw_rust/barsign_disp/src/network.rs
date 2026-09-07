@@ -1167,7 +1167,9 @@ unsafe fn api_dmatest(resp: &mut HttpResponse) {
                 break;
             }
         }
-        dma.ctrl().write(|w| w.start().clear_bit());
+        // No clear needed: `start` is a pulse field now. It used to latch, so
+        // the FSM re-armed the instant the burst finished and this loop was
+        // measuring an unknown number of bursts rather than REPEATS of them.
         cycles += dma.cycles().read().bits() as u64;
         written += dma.written().read().bits() as u64;
     }

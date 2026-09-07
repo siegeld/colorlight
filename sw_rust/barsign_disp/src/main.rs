@@ -105,9 +105,24 @@ _trap_handler:
     addi t1, t1, 1
     sw t1, 0(t0)
 
-    # Disable ev_enable to prevent interrupt storm
-    li t0, 0xF0001814
-    sw zero, 0(t0)
+    # NO hardcoded CSR write here. This used to be:
+    #     li t0, 0xF0001814 ; sw zero, 0(t0)
+    # meaning to clear ethmac_sram_writer_ev_enable "to prevent interrupt
+    # storm". That address stopped being ethmac when the pixdma block was added
+    # and shifted the CSR map: 0xF0001814 is now pixdma_bad_magic, and ethmac's
+    # ev_enable moved to 0xF0002814. The write therefore landed on a read-only
+    # status register and did nothing -- which is also why
+    # check_and_reenable_interrupt() never fired, since it tests for the
+    # ev_enable this was supposed to have cleared.
+    #
+    # It is deleted rather than re-pointed. The masking was never actually
+    # active, so the firmware's real, working behaviour is the unmasked one, and
+    # switching it on now would be an untested change to interrupt timing. What
+    # had to go is the blind absolute write: it is harmless only for as long as
+    # nothing writable occupies that address, and this is the second time a
+    # hardcoded address in this vector has drifted (see the 0x40020000 counter
+    # that was overwriting .text). Peripheral access belongs in Rust, through
+    # the PAC, where the linker resolves it.
 
     # Call Rust network handler (does ALL network processing)
     call network_handler
@@ -277,8 +292,20 @@ fn main() -> ! {
         // 1. Enable ETHMAC peripheral interrupt
         ethernet::enable_rx_interrupt();
 
-        // 2. Set VexRiscv IRQ_MASK bit 2 (ETHMAC is IRQ #2)
-        core::arch::asm!("csrw 0xBC0, {}", in(reg) (1u32 << 2));
+        // 2. Set VexRiscv IRQ_MASK. ETHMAC is IRQ 2, Timer0 is IRQ 1
+        //    (build/colorlight_5a_75e/csr.csv).
+        //
+        //    The timer bit was missing, which made the panel's clock a function
+        //    of inbound ethernet: update_time_from_timer() is only reached from
+        //    network_handler(), so TIME_MS advanced solely when a packet
+        //    arrived, and any whole second that elapsed without one was lost
+        //    outright -- ev_pending is a single latched bit, not a counter, so
+        //    the clock ran slow and never caught up. It went unnoticed only
+        //    because this segment carries constant broadcast traffic; the
+        //    planned dedicated panel VLAN removes exactly that, which would
+        //    have stopped the stale-frame flush working just as the quiet
+        //    network made it necessary.
+        core::arch::asm!("csrw 0xBC0, {}", in(reg) ((1u32 << 2) | (1u32 << 1)));
 
         // 3. Enable machine external interrupts and global interrupt enable
         riscv::register::mie::set_mext();
@@ -287,6 +314,13 @@ fn main() -> ! {
     writeln!(r.context.output.serial, "Interrupts enabled").ok();
 
     let mut last_time_ms: i64 = 0;
+    // Deadlines, not `time_ms % N == 0`. TIME_MS is resampled from the hardware
+    // counter inside the ISR, so it advances by the inter-ISR gap rather than a
+    // millisecond at a time -- every multiple that fell inside a jump was
+    // skipped outright, which made the status refresh and the "30 fps"
+    // animation fire erratically and stall entirely under sparse traffic.
+    let mut last_status_ms: i64 = 0;
+    let mut last_anim_ms: i64 = 0;
 
     // Configure timer0 for 1-second period
     // We read the countdown value to get millisecond precision
@@ -298,6 +332,7 @@ fn main() -> ! {
         t.load().write(|w| w.bits(40_000_000 - 1));
         t.en().write(|w| w.bits(1));
         t.ev_pending().write(|w| w.bits(1));        // clear any pending event
+        t.ev_enable().write(|w| w.bits(1));         // route the tick to the CPU
     }
 
     // ========================================================================
@@ -325,9 +360,18 @@ fn main() -> ! {
 
         // Skip processing on non-timer ticks or when streaming
         let streaming = network::is_streaming();
-        if !timer_tick || (time_ms % 5 != 0) {
+        if !timer_tick {
             continue;
         }
+        // Re-sync rather than wedge if the clock ever steps backwards.
+        if time_ms < last_status_ms {
+            last_status_ms = time_ms;
+            last_anim_ms = time_ms;
+        }
+        if time_ms - last_status_ms < 5 {
+            continue;
+        }
+        last_status_ms = time_ms;
 
         // Update MAC error counters for display
         let (ovf, pre, crc) = network::mac_errors();
@@ -340,7 +384,8 @@ fn main() -> ! {
         r.context.boot_server = network::boot_server();
 
         // Update animation at ~30fps (every 33ms), but skip during streaming
-        if !streaming && time_ms % 33 == 0 {
+        if !streaming && time_ms - last_anim_ms >= 33 {
+            last_anim_ms = time_ms;
             r.context.animation_tick();
         }
 

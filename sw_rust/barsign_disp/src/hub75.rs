@@ -76,9 +76,16 @@ impl Hub75 {
     }
 
     /// Write pixel data to the back buffer (not yet displayed)
+    /// Clamped like every other consumer of `self.length`. The old form indexed
+    /// `hub75_data[offset..]` and computed `self.length - offset`, both of which
+    /// are wrong for `offset > length`; it survived only because every caller
+    /// passes 0 and the release profile leaves overflow checks off.
     pub fn write_img_data(&mut self, offset: usize, data: impl Iterator<Item = u32>) {
-        let sdram = self.hub75_data[offset..].iter_mut();
-        for (sdram, data) in sdram.zip(data).take(self.length as usize - offset) {
+        let limit = (self.length as usize).min(self.hub75_data.len());
+        if offset >= limit {
+            return;
+        }
+        for (sdram, data) in self.hub75_data[offset..limit].iter_mut().zip(data) {
             *sdram = data;
         }
     }
@@ -173,9 +180,12 @@ impl Hub75 {
         } else {
             FB_BASE_WORDS
         };
+        // One register flips both: the gateware derives the pixel DMA's write
+        // address from fb_base, so the display and the DMA can no longer
+        // disagree about which half is live. Updating them as two separate CSR
+        // writes left a window in which a chunk header latched into the buffer
+        // being displayed.
         unsafe { self.hub75.fb_base().write(|w| w.offset().bits(base)) };
-        // The DMA writes into the CPU's back buffer, which just changed.
-        self.update_dma_base();
     }
 
     /// Read pixel data from the front buffer (what's currently displayed)
@@ -210,30 +220,29 @@ impl Hub75 {
         }
     }
 
-    /// Point the hardware pixel DMA at the current BACK buffer.
+    /// Publish the image bound the hardware DMA clamps against.
     ///
-    /// Tier 2: streamed pixels are written to SDRAM by gateware, not by the CPU.
-    /// The DMA must always target the buffer the CPU is filling, so this is
-    /// called on every swap. Word address is relative to SDRAM base, which is
-    /// what the gateware crossbar port addresses.
-    pub fn update_dma_base(&self) {
-        let word = ((self.hub75_data.as_ptr() as usize - 0x9000_0000) / 4) as u32;
-        unsafe {
-            let p = litex_pac::Peripherals::steal();
-            p.pixdma.base().write(|w| w.bits(word));
-        }
-    }
-
-    /// Enable/disable hardware pixel writes, and publish the image bound the
-    /// DMA clamps against so a malformed chunk cannot write past the buffer.
-    pub fn set_dma_enabled(&mut self, on: bool) {
+    /// Must be re-published whenever `self.length` changes, not just when the
+    /// DMA is switched on. `set_dma_enabled` used to be the only writer, so a
+    /// layout change after enabling left the DMA clamping against the *old*
+    /// image: every pixel past the stale bound was silently discarded while the
+    /// CPU's arrival mask still reported the chunk as present, leaving a region
+    /// of the display permanently dead.
+    fn publish_dma_limit(&self) {
         let limit = (self.length as usize).min(self.hub75_data.len()) as u32;
         unsafe {
             let p = litex_pac::Peripherals::steal();
             p.pixdma.limit().write(|w| w.bits(limit));
+        }
+    }
+
+    /// Enable/disable hardware pixel writes.
+    pub fn set_dma_enabled(&mut self, on: bool) {
+        self.publish_dma_limit();
+        unsafe {
+            let p = litex_pac::Peripherals::steal();
             p.pixdma.ctrl().write(|w| w.enable().bit(on));
         }
-        self.update_dma_base();
     }
 
     pub fn dma_enabled(&self) -> bool {
@@ -256,6 +265,9 @@ impl Hub75 {
     pub fn set_img_param(&mut self, width: u16, length: u32) {
         unsafe { self.hub75.ctrl().modify(|_, w| w.width().bits(width)) };
         self.length = length;
+        // The DMA clamps against this bound in hardware, so it has to follow
+        // every image-size change -- layout apply, telnet `panel`, /api/layout.
+        self.publish_dma_limit();
     }
 
     pub fn get_img_param(&self) -> (u16, u32) {

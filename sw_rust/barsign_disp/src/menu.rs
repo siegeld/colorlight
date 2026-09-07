@@ -657,7 +657,11 @@ fn panel_cmd(
         }
         let (w, len) = context.hub75.get_img_param();
         writeln!(context.output, "img: width={} length={}", w, len).unwrap();
-        let raw = unsafe { core::ptr::read_volatile(0xF0003000 as *const u32) };
+        // Was read_volatile(0xF0003000), which is ethphy_crg_reset -- not the
+        // hub75 CTRL this line claims to print. hub75 sits at 0xF0004000; the
+        // literal was left behind by a CSR-map shift, so this diagnostic has
+        // been reporting an unrelated peripheral. Read it through the PAC.
+        let raw = unsafe { litex_pac::Peripherals::steal().hub75.ctrl().read().bits() };
         writeln!(context.output, "CTRL raw: 0x{:08x}", raw).unwrap();
         return;
     }

@@ -455,17 +455,24 @@ class AlwaysReady(Module):
         ]
 
         self.sync += [
-            If(need_last,
-                If(source.ready,
-                    need_last.eq(0),
-                ),
-            ).Elif(sink.valid,
+            # The synthetic terminator retires once downstream takes it.
+            If(need_last & source.ready,
+                need_last.eq(0),
+            ),
+            # Sink tracking is NOT under an Elif on need_last. sink.ready is
+            # unconditionally 1, so beats keep arriving while the terminator is
+            # still going out, and one of them can be the packet's `last`.
+            # Skipping the tracking for those cycles left `dropping` set into
+            # the following packet, and since source.valid is gated on
+            # ~dropping, that entire next packet was silently swallowed -- one
+            # drop quietly becoming two.
+            If(sink.valid,
                 If(sink.last,
                     in_packet.eq(0),
                     dropping.eq(0),
                 ).Else(
                     in_packet.eq(1),
-                    If(~dropping & ~source.ready,
+                    If(~dropping & ~need_last & ~source.ready,
                         # Downstream just refused a mid-packet beat: stop
                         # forwarding this packet, but terminate it first.
                         dropping.eq(1),
@@ -475,6 +482,13 @@ class AlwaysReady(Module):
                 ),
             ),
         ]
+        # Ordering note: when a real `last` lands while need_last is pending,
+        # need_last already forces valid+last on that same beat, so the
+        # terminator is satisfied by the real one and the first If clears it.
+        # The remaining edge -- a real `last` arriving while downstream is still
+        # stalled -- leaves the terminator pending into the next packet, which
+        # downstream then rejects on length. Rare, and it fails loudly rather
+        # than silently.
 
 
 class Bytes32to8(Module):

@@ -297,9 +297,12 @@ pub fn poll_minimal_count() -> usize {
 /// ev_enable should be disabled by caller before calling this.
 #[no_mangle]
 pub extern "C" fn poll_rx_one() {
-    const EV_PENDING: *mut u32 = 0xF000_1810 as *mut u32;
+    // Was a hardcoded 0xF000_1810, which the pixdma block displaced: that
+    // address is now pixdma_chunks (read-only), while ethmac's ev_pending moved
+    // to 0xF0002810. Go through the PAC so the address can never drift again.
+    let ethmac = unsafe { &*litex_pac::Ethmac::ptr() };
+    ethmac.sram_writer_ev_pending().write(|w| unsafe { w.bits(1) });
     unsafe {
-        core::ptr::write_volatile(EV_PENDING, 1);
         POLL_MINIMAL_COUNT += 1;
     }
 }

@@ -28,7 +28,15 @@ class SdramWriteTester(Module, AutoCSR):
         self.base = CSRStorage(24, description="First word address of the burst")
         self.length = CSRStorage(24, description="Words to write in the burst")
         self.ctrl = CSRStorage(fields=[
-            CSRField("start", description="Write 1 to arm a burst (self-clearing)"),
+            # pulse=True is load-bearing, not decoration. Without it this field
+            # latches, and because the FSM re-arms from IDLE whenever start is
+            # high, the burst restarts the instant it finishes. busy is then low
+            # for ~2 cycles in every ~262,144, so the CPU's poll almost never
+            # sees the gap and keeps re-triggering -- making elapsed_ms and the
+            # refresh delta span an unknown number of bursts instead of the
+            # BURST_WORDS * REPEATS the caller asked for.
+            CSRField("start", pulse=True,
+                     description="Write 1 to arm a burst (self-clearing pulse)"),
         ])
         self.status = CSRStatus(fields=[
             CSRField("busy", description="Burst in progress"),
@@ -102,12 +110,18 @@ class Hub75UdpDma(Module, AutoCSR):
     exactly as before. Only the pixel copy moves to hardware.
     """
 
-    def __init__(self, sdram, udp_sink, pixels_per_chunk=487, fifo_depth=64,
-                 stall_limit=8192):
+    def __init__(self, sdram, udp_sink, display_base, fb_base, half_words,
+                 pixels_per_chunk=487, fifo_depth=64, stall_limit=8192):
         port = sdram.crossbar.get_port(mode="write", data_width=32)
         self.submodules.writer = writer = LiteDRAMDMAWriter(port, fifo_depth=fifo_depth)
 
-        self.base = CSRStorage(24, description="Framebuffer word address the CPU is writing into")
+        # The write base is DERIVED from the display's fb_base, never written
+        # separately. When the CPU owned both registers a buffer swap took two
+        # CSR writes, and between them the display and this DMA both pointed at
+        # the same half -- so a chunk header parsed in that window latched
+        # pix_adr into the buffer being displayed and put a band of the next
+        # frame on screen. One register, written once, flips both atomically.
+        self.base = CSRStatus(24, description="Derived framebuffer write address (read-only)")
         self.limit = CSRStorage(24, description="Pixels in the image; writes past this are dropped")
         self.ctrl = CSRStorage(fields=[
             CSRField("enable", description="Enable hardware pixel writes"),
@@ -136,6 +150,19 @@ class Hub75UdpDma(Module, AutoCSR):
             setattr(self, "arrival%d" % i, csr)
         self.frame_id = CSRStatus(16, description="frame_id the arrival bitmap describes")
 
+        # Two halves: the DMA always targets whichever one the display is not
+        # reading. Written as an explicit compare rather than an XOR so it does
+        # not silently depend on the two bases differing in exactly one bit.
+        write_base = Signal(24)
+        self.comb += [
+            If(display_base == fb_base,
+                write_base.eq(fb_base + half_words),
+            ).Else(
+                write_base.eq(fb_base),
+            ),
+            self.base.status.eq(write_base),
+        ]
+
         sink = udp_sink
         hdr_idx = Signal(4)
         chunk_index = Signal(8)
@@ -157,6 +184,9 @@ class Hub75UdpDma(Module, AutoCSR):
         arrival = Signal(256)
         set_arrival = Signal()
         clear_arrival = Signal()
+
+        in_range = Signal()
+        self.comb += in_range.eq(pix_adr < (write_base + self.limit.storage))
 
         # HUB75 framebuffer word format is 0x00GGRRBB.
         word = Signal(32)
@@ -213,7 +243,7 @@ class Hub75UdpDma(Module, AutoCSR):
                         NextValue(self.frame_id.status, frame_id),
                     ),
                     # Header consumed; pixels start on the next beat.
-                    NextValue(pix_adr, self.base.storage + chunk_index * pixels_per_chunk),
+                    NextValue(pix_adr, write_base + chunk_index * pixels_per_chunk),
                     NextValue(sub, 0),
                     NextValue(self.chunks.status, self.chunks.status + 1),
                     NextState("PIX"),
@@ -247,12 +277,17 @@ class Hub75UdpDma(Module, AutoCSR):
                 ),
             ).Else(
                 sink.ready.eq(writer.sink.ready),
-                writer.sink.valid.eq(sink.valid & (pix_adr < (self.base.storage + self.limit.storage))),
+                writer.sink.valid.eq(sink.valid & in_range),
                 If(sink.valid & writer.sink.ready,
                     progress.eq(1),
                     NextValue(sub, 0),
                     NextValue(pix_adr, pix_adr + 1),
-                    NextValue(self.pixels.status, self.pixels.status + 1),
+                    # Count only writes actually issued. Counting the ones the
+                    # limit suppressed made `pixels` look healthy while a stale
+                    # bound was discarding everything past it.
+                    If(in_range,
+                        NextValue(self.pixels.status, self.pixels.status + 1),
+                    ),
                 ),
             ),
             If(sink.valid & sink.ready & sink.last,
