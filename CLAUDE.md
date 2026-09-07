@@ -81,16 +81,37 @@ The bottleneck is the CPU pixel loop, not the network. Numbers from
 `tools/bench_stream.py` on v1.10.6, worth re-checking after any change here:
 
 - **~600,000 px/s hard ceiling** — flat regardless of how hard you push. At
-  256x128 that is 18 fps absolute, ~15.6 fps clean.
+  256x128 that is 18 fps absolute.
+- **The "~15.6 fps clean" figure does NOT reproduce.** It was measured on the
+  mismatched flash gateware. Re-measured 2026-09-07 on matched gateware, both
+  v1.10.6 and v1.10.10 are clean (0% loss) only to ~2 ms spacing = **7.35 fps**,
+  with loss appearing by 1.20 ms. Trust a fresh sweep over any number here.
 - **Cause**: VexRiscv_Lite has an I-cache but *no D-cache*
   (`cpu_variant="lite"`), so every access is a bare bus round-trip. The old
   byte-at-a-time RGB unpack cost 4 of them per pixel (3 loads + 1 store) at
   ~17 cycles each. v1.10.8 reads the payload 32 bits at a time — 3 loads + 4
-  stores per 4 pixels instead of 12 + 4.
+  stores per 4 pixels instead of 12 + 4. **This did not deliver the expected
+  ~2x.** Measured head-to-head on identical gateware, v1.10.10 beats v1.10.6 at
+  moderate rates (3.5% vs 11.1% loss at 1.20 ms) and ties at 0.80 ms (9.8% vs
+  11.0%), but the clean ceiling is unchanged. Treat the 2x as unproven.
 - Going meaningfully past ~40 fps needs the pixels off the CPU entirely: a
   `LiteDRAMDMAWriter` fed from a LiteEth UDP port. Note the display DMA already
   reads the whole framebuffer every refresh and is close to SDRAM-bandwidth
   bound, so write DMA trades refresh rate for frame rate.
+- **Landmines that cost a full night (2026-09-07), both now fixed — do not
+  reintroduce the pattern:** the assembly trap vector incremented a counter at a
+  *hardcoded* `0x40020000`, which is inside `.text`, so every interrupt
+  overwrote an instruction in the running firmware. And `panic.rs` spun
+  unbounded on the UART TX FIFO, which nothing drains on a board with no serial
+  console, so panics hung instead of rebooting. Anything writing to a fixed
+  absolute address in RAM, or waiting forever on a peripheral, is suspect here.
+- **Debugging without serial**: `src/breadcrumb.rs` records how far execution got
+  before a crash in uncached SDRAM that survives `soc_rst`; read `prev_mark`,
+  `prev_mcause` and `prev_mepc` from `/api/status` after a reboot. The trap
+  vector records CPU exceptions. This found the bug above after bisection failed.
+- **The failure was intermittent (~1 run in 3).** Never bisect this system on a
+  single run, and verify the board is alive *before* each measurement — a dead
+  board silently reports zero errors because nothing is running to fail.
 - The framebuffer is 65,536 words per buffer — **exactly** 8 panels of 128x64,
   with no headroom. The bitstream can drive 12, which would not fit. There is
   spare SDRAM in the framebuffer region if that needs raising.

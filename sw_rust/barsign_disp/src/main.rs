@@ -66,9 +66,41 @@ _trap_handler:
     sw t6, 116(sp)    # x31
     # 120-124 = padding
 
+    # === EXCEPTION CAPTURE ===
+    # This vector is entered for BOTH interrupts and exceptions, and the code
+    # below assumes an interrupt -- it calls network_handler unconditionally and
+    # mrets. A CPU exception (misaligned/faulting load or store) therefore
+    # re-enters the network path instead of being reported, which is invisible
+    # on a board with no serial console. Record mcause/mepc to the breadcrumb
+    # words and reset, so the fault becomes readable after the reboot.
+    csrr t0, mcause
+    bltz t0, 2f              # MSB set => interrupt: normal path
+    li   t1, 0x902A0008
+    sw   t0, 0(t1)           # mcause
+    csrr t2, mepc
+    sw   t2, 4(t1)           # mepc
+    li   t3, 0x902A0000
+    li   t4, 0xBEEF0063      # breadcrumb code 99 = EXCEPTION
+    sw   t4, 0(t3)
+    li   t5, 0xf0001000      # CSR_CTRL_RESET
+    li   t6, 1
+    sw   t6, 0(t5)           # soc_rst
+1:  j 1b
+2:
+
     # === ISR LOGIC ===
-    # Increment counter at 0x40020000
-    li t0, 0x40020000
+    # Increment the ISR counter.
+    #
+    # This used to be `li t0, 0x40020000` -- a hardcoded address that is NOT
+    # reserved for anything. .text spans 0x40000000-0x40026938, so 0x40020000
+    # lands INSIDE the firmware's own code, and every interrupt overwrote an
+    # instruction there with the counter value. Whether that crashed depended on
+    # whether the clobbered word was ever executed and whether the current count
+    # happened to decode as a legal instruction -- which is why the failure was
+    # intermittent and why it moved when the code layout changed.
+    # Confirmed on hardware: mcause=2 (illegal instruction), mepc=0x40020000,
+    # with 0x40020000 disassembling to an instruction inside present().
+    la t0, ISR_COUNTER
     lw t1, 0(t0)
     addi t1, t1, 1
     sw t1, 0(t0)
@@ -130,6 +162,9 @@ fn main() -> ! {
 
     serial.bwrite_all(b"Hello world!\n").unwrap();
 
+    // Latch any crash marker from the previous boot before we overwrite it.
+    breadcrumb::capture_boot();
+
     let mut hub75 = hub75::Hub75::new(peripherals.hub75, peripherals.hub75_palette);
 
     // Read flash unique ID before Flash takes ownership of SPI peripheral
@@ -149,9 +184,9 @@ fn main() -> ! {
     let out_data = heapless::Vec::new();
     let mut output = menu::Output { serial, out_data };
 
-    // Initialize ISR counter at 0x40020000 to zero
+    // Initialize the ISR counter
     unsafe {
-        core::ptr::write_volatile(0x40020000 as *mut u32, 0);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(barsign_disp::ISR_COUNTER), 0);
     }
 
     // Set up trap handler infrastructure (using main stack, no mscratch)
@@ -172,13 +207,18 @@ fn main() -> ! {
 
     // Load image from SPI flash if available, otherwise use default
     if let Ok(image) = img::load_image(flash.read_image()) {
+        let w = image.0;
         hub75.set_img_param(image.0, image.1);
         hub75.write_img_data(0, image.3);
+        // Stamp the running version on the panel itself.
+        hub75.draw_version_banner(w as usize);
         hub75.swap_buffers();
     } else {
         let image = img::load_default_image();
+        let w = image.0;
         hub75.set_img_param(image.0, image.1);
         hub75.write_img_data(0, image.3);
+        hub75.draw_version_banner(w as usize);
         hub75.swap_buffers();
     }
 

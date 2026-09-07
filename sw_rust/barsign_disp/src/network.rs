@@ -1012,8 +1012,17 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
     write!(resp, r#""slow_arp":{},"slow_tcp":{},"slow_udp":{},"slow_other":{},"#,
         DBG_SLOW_ARP, DBG_SLOW_TCP, DBG_SLOW_UDP, DBG_SLOW_OTHER).ok();
     write!(resp, r#""mcast_dropped":{},"#, DBG_MULTICAST_DROPPED).ok();
-    write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{}}}"#,
+    write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{},"#,
         mac_ovf, mac_crc, mac_pre).ok();
+    // Crash breadcrumb: how far execution got before the PREVIOUS boot ended.
+    let bc_prev = crate::breadcrumb::prev_raw();
+    write!(resp, r#""prev_mark":{},"prev_mark_valid":{},"bc_now":{},"bc_count":{}"#,
+        bc_prev & 0xFFFF,
+        if crate::breadcrumb::previous(bc_prev).is_some() { 1 } else { 0 },
+        crate::breadcrumb::raw() & 0xFFFF,
+        crate::breadcrumb::count()).ok();
+    write!(resp, r#","prev_mcause":{},"prev_mepc":{}}}"#,
+        crate::breadcrumb::prev_mcause(), crate::breadcrumb::prev_mepc()).ok();
 }
 
 unsafe fn api_layout_get(resp: &mut HttpResponse) {

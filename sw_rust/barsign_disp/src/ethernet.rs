@@ -311,9 +311,9 @@ pub extern "C" fn ethmac() {
     poll_rx_to_ring();
 }
 
-/// Get ISR invocation count (for debugging) - reads from 0x40020000
+/// Get ISR invocation count (for debugging).
 pub fn isr_count() -> usize {
-    unsafe { core::ptr::read_volatile(0x40020000 as *const u32) as usize }
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(crate::ISR_COUNTER)) as usize }
 }
 
 /// Increment ISR count (called from trap handler)
@@ -418,7 +418,7 @@ pub fn check_and_reenable_interrupt() -> bool {
     false
 }
 
-/// Read the debug trap counter at 0x40020000 (written by assembly trap handler)
+/// Read the debug trap counter (written by the assembly trap handler).
 pub fn debug_trap_count() -> u32 {
-    unsafe { core::ptr::read_volatile(0x40020000 as *const u32) }
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(crate::ISR_COUNTER)) }
 }

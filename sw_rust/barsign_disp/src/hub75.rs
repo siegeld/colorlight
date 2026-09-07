@@ -7,6 +7,10 @@ const OUTPUTS: u8 = 6;
 const FB_SDRAM_OFFSET_BYTES: u32 = 0x00400000 / 2;
 const FB_TOTAL_WORDS: usize = 0x00400000 / 2 / 4;  // 131072 words total
 const FB_HALF_WORDS: usize = FB_TOTAL_WORDS / 2;    // 65536 words per buffer
+
+/// Largest image one framebuffer can hold, in pixels. An image header
+/// claiming more than this is not valid -- see img::load_image().
+pub const MAX_IMG_PIXELS: usize = FB_HALF_WORDS;
 const FB_BASE_WORDS: u32 = FB_SDRAM_OFFSET_BYTES / 4; // 0x80000 - gateware word address
 
 pub struct Hub75 {
@@ -104,7 +108,6 @@ impl Hub75 {
             return 0;
         }
         let dst = &mut self.hub75_data[offset..offset + n_px];
-
         if src.as_ptr() as usize % 4 == 0 {
             let words = src.as_ptr() as *const u32;
             let groups = n_px / 4;
@@ -175,7 +178,34 @@ impl Hub75 {
 
     /// Read pixel data from the front buffer (what's currently displayed)
     pub fn read_img_data(&'_ self) -> impl Iterator<Item = u32> + '_ {
-        self.display_buffer[0..self.length as usize].iter().copied()
+        // Clamp like every other consumer of self.length; unguarded this
+        // panics on a bad image header, and a panic reboots the SoC.
+        let limit = (self.length as usize).min(self.display_buffer.len());
+        self.display_buffer[0..limit].iter().copied()
+    }
+
+    /// Overlay the firmware version in the top-left of the back buffer.
+    ///
+    /// Called at boot so the panel itself reports which build is running.
+    pub fn draw_version_banner(&mut self, width: usize) {
+        if width == 0 {
+            return;
+        }
+        let limit = (self.length as usize).min(self.hub75_data.len());
+        let text_w = (crate::patterns::VERSION_TEXT.len() * 6 + 4).min(width);
+        for row in 0..11usize {
+            for col in 0..text_w {
+                let idx = row * width + col;
+                if idx >= limit {
+                    return;
+                }
+                if crate::patterns::boot_version_pixel(col, row) {
+                    self.hub75_data[idx] = 0x00FF_FFFF;
+                } else {
+                    self.hub75_data[idx] = 0;
+                }
+            }
+        }
     }
 
     pub fn set_img_param(&mut self, width: u16, length: u32) {

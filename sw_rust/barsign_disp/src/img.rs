@@ -21,6 +21,16 @@ pub fn load_image(
     ),
     (),
 > {
+    // Parses whatever is in SPI flash at the image offset. Nothing guarantees an
+    // image was ever written there, so treat the header as untrusted: an accepted
+    // garbage header feeds `width` into the HUB75 width CSR (which addresses SDRAM
+    // for the display DMA) and `length` into every buffer bound in hub75.rs.
+    // Observed on hardware: header 0x0000B080 at chip offset 0x300000 passed the
+    // bit-31 test and gave width=45184, length=4201088. Erased flash (0xFFFFFFFF)
+    // is caught by the bit-31 test; stale or partially-written flash is not.
+    if data.len() < 256 {
+        return Err(());
+    }
     let (header, data) = data.split_at(256);
     let mut header = header
         .chunks(4)
@@ -34,6 +44,12 @@ pub fn load_image(
     }
     let width = (header_start & 0xFFFF) as u16;
     let length = header.next().unwrap();
+    if width == 0 || length == 0 || length as usize > crate::hub75::MAX_IMG_PIXELS {
+        return Err(());
+    }
+    if width as u32 > length {
+        return Err(());
+    }
 
     Ok((width, length, header.skip(2), data.take(length as usize)))
 }

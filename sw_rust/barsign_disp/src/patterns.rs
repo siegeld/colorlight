@@ -21,6 +21,42 @@ const FONT_5X7: &[(&[u8; 7], char)] = &[
     (&[0b00000, 0b00000, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100], 'v'),
 ];
 
+/// Firmware version string, as drawn on the panel at boot.
+pub const VERSION_TEXT: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+
+/// Is (col, row) lit for the boot version banner, drawn at a fixed top-left
+/// origin? Independent of the grid pattern's layout so it can be overlaid on
+/// whatever image is showing.
+///
+/// Exists because identifying the running firmware otherwise means correlating
+/// a TFTP log with a build artifact -- which cost real debugging time when a
+/// stale daemon served a months-old boot.bin and everything looked normal.
+pub fn boot_version_pixel(col: usize, row: usize) -> bool {
+    const ORIGIN_X: usize = 2;
+    const ORIGIN_Y: usize = 2;
+    if row < ORIGIN_Y || row >= ORIGIN_Y + 7 {
+        return false;
+    }
+    let text_width = VERSION_TEXT.len() * 6;
+    if col < ORIGIN_X || col >= ORIGIN_X + text_width {
+        return false;
+    }
+    let char_idx = (col - ORIGIN_X) / 6;
+    let pixel_x = (col - ORIGIN_X) % 6;
+    let pixel_y = row - ORIGIN_Y;
+    if pixel_x >= 5 {
+        return false;
+    }
+    if let Some(ch) = VERSION_TEXT.chars().nth(char_idx) {
+        for (glyph, c) in FONT_5X7 {
+            if *c == ch {
+                return (glyph[pixel_y] >> (4 - pixel_x)) & 1 == 1;
+            }
+        }
+    }
+    false
+}
+
 /// Check if pixel (col, row) should be lit for version text in second-row left square (avoids diagonals)
 fn is_version_pixel(col: usize, row: usize, width: usize, height: usize) -> bool {
     const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));

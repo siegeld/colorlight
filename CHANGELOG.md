@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.10] - 2026-09-07
+
+### Fixed
+- **The interrupt handler was overwriting the firmware's own code.** The
+  assembly trap vector in `main.rs` incremented its counter at a hardcoded
+  `0x40020000`. Nothing reserves that address: `.text` spans
+  `0x40000000-0x40026938`, so every single interrupt wrote the ISR count over an
+  instruction inside the running image. Confirmed on hardware — `mcause=2`
+  (illegal instruction) with `mepc=0x40020000`, and that address disassembles to
+  an instruction in `BitmapReceiver::present()`.
+
+  This is why v1.10.8 and v1.10.9 crashed under packet loss while v1.10.6 did
+  not: the bug is old, but the clobbered word only matters if it is executed,
+  and v1.10.8's layout moved `present()` onto it. The corrupted word lands in a
+  stats-increment path that runs only for *damaged* frames, so clean streaming
+  never touched it. It was intermittent (~1 run in 3) because the word holds the
+  live interrupt count, and some counter values happen to decode as legal
+  instructions.
+
+  The counter is now a linker-allocated `ISR_COUNTER` in `.bss`.
+
+- **The panic handler could never finish.** `panic.rs` spun on
+  `while uart.txfull().read().bits() != 0 {}` with no bound. This board has no
+  serial console, so nothing drains the TX FIFO: once it filled, the handler
+  spun forever and never reached its own `soc_rst`. That turned every panic into
+  an unrecoverable hang, and it is why identical firmware appeared to "reset" on
+  some runs and "hang" on others — it depended only on how full the FIFO was.
+  The wait is now bounded and the message is dropped rather than the reboot.
+  The handler also masks interrupts on entry; it previously ran with them
+  enabled, so the network ISR kept firing while it was stuck.
+
+- **The trap vector ignored `mcause`.** It assumed every trap was the network
+  interrupt and called `network_handler` unconditionally, so a CPU exception
+  re-entered the failing code instead of being reported — invisible without a
+  serial console. Exceptions are now recorded and reset cleanly.
+
+- **`load_image()` accepted uninitialised flash as a valid image.** Its only
+  check was bit 31 of the first word. Erased flash (`0xFFFFFFFF`) is rejected by
+  that, but stale flash is not: the actual contents at chip offset `0x300000`
+  are `0x0000B080`, which passes, yielding `width=45184` and `length=4201088`
+  straight into the HUB75 width CSR and every buffer bound in `hub75.rs`. Now
+  bounds-checked against `MAX_IMG_PIXELS`.
+
+- **`read_img_data()` sliced by `self.length` with no clamp**, unlike every
+  other consumer of that field. Reachable from the image-save path in `menu.rs`.
+
+### Added
+- **Firmware version on the panel.** The running version is drawn top-left at
+  boot, so the display itself reports which build is loaded. Identifying the
+  running firmware otherwise means correlating a TFTP log against a build
+  artifact, which cost hours when a 210-day-old daemon was serving a
+  months-old `boot.bin`.
+- **`breadcrumb` module** — records how far execution got before a crash, in
+  uncached SDRAM that survives `soc_rst`, readable from `/api/status`
+  (`prev_mark`, `prev_mcause`, `prev_mepc`). This is what located the bug above
+  after bisection failed.
+
+### Verified on hardware
+- 10 consecutive health-gated drop-test runs: **zero resets, zero hangs**, all
+  breadcrumbs clean.
+- Tier 0 now does what it was written to do. Omitting the last chunk (#67):
+  `partial=10, dropped=0, repaired=10` — every frame presented, each missing
+  band patched. v1.10.6 on the same gateware loses those frames outright.
+- `chunks_repaired` increments for the first time; it never could before,
+  because the firmware crashed before completing a repair.
+
+### Corrected
+- **Tier 1's "~2x throughput" is not supported by measurement.** Sweeping
+  v1.10.10 against v1.10.6 on identical gateware: v1.10.10 is better at moderate
+  rates (3.5% vs 11.1% loss at 1.20ms) and comparable at 0.80ms (9.8% vs 11.0%),
+  but both are clean only to ~2ms (7.35fps). No 2x. The previously documented
+  "clean to 15.59fps" baseline was measured on the mismatched flash gateware and
+  does not reproduce here.
+
 ## [1.10.9] - 2026-09-06
 
 ### Fixed

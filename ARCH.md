@@ -65,7 +65,7 @@ This design was chosen to enable TCP (telnet) which hardware-only stacks don't s
 | SRAM | 0x10000000 | 8KB | Stack/heap |
 | Main RAM | 0x40000000 | 4MB | SDRAM, firmware runs here |
 | EthMAC | 0x80000000 | 20KB | 8 RX + 2 TX slots × 2KB each |
-| SPI Flash | 0x80400000 | 4MB | Memory-mapped flash (W25Q32JV) |
+| SPI Flash | 0x80400000 | 4MB | Memory-mapped flash (declared W25Q32JV; silicon reports GigaDevice GD25Q32, JEDEC `c8 40 16`) |
 | Flash Boot | 0x80500000 | - | Firmware load address (chip offset 0x100000) |
 | CSR | 0xF0000000 | 64KB | Peripheral registers |
 
@@ -209,22 +209,35 @@ typically completes within 1–2 seconds of DHCP completion.
 
 - FPGA: Lattice ECP5-25F (LFE5U-25F-6BG256C)
 - SDRAM: M12L16161A (2M x 16bit)
-- Flash: W25Q32JV (4MB) - **not GD25Q16**
+- Flash: 4MB - **not GD25Q16 (2MB)**. Declared as `W25Q32JV`, but the JEDEC ID read
+  over JTAG is `c8 40 16` = GigaDevice **GD25Q32**. Functionally equivalent here.
 - Ethernet PHY: RTL8211FD (RGMII)
 - System clock: 40MHz
 
 ## Known Issues & Solutions
 
-### Flash Boot Fails (rev 8.2) — FIXED in v1.10.7
+### Flash Boot Fails (rev 8.2) — PARTIALLY ADDRESSED in v1.10.7, NOT VERIFIED
 
 **Symptom:** BIOS sends TFTP requests for `boot.bin` instead of loading from flash,
 so the board only comes up while a TFTP server is running and dies on a power cycle.
 
-**Cause:** `gateware/colorlight.py` declared a `GD25Q16` (2MB GigaDevice) while rev 8.2
-boards carry a **W25Q32JV** (4MB Winbond). The SPI flash never enumerated correctly, so
-the BIOS fell through to network boot.
+**Suspected cause:** `gateware/colorlight.py` declared a `GD25Q16` (2MB) while the flash
+on this board is 4MB, so the declared size was wrong.
 
-**Fix:** `gateware/colorlight.py` now instantiates `W25Q32JV`. Both parts share the
+**This has never been confirmed as the reason flash boot failed.** A simpler explanation
+fits the evidence better and remains untested: nothing ever *wrote* the firmware to
+`FLASH_BOOT_ADDRESS`. `build.sh` had no target that did so until `flash-firmware` was
+added on 2026-09-06, and that target has still never been run. Flash boot cannot work if
+the firmware was never put where the BIOS looks for it, regardless of the flash module.
+
+**The declared part is also wrong.** Reading the JEDEC ID over JTAG on 2026-09-07 returns
+`c8 40 16`: manufacturer `0xc8` is **GigaDevice**, not Winbond (`0xef`), with capacity
+`0x16` = 4MB. So the chip is a **GD25Q32**, and the correct change was `GD25Q16` ->
+`GD25Q32`, not a switch to `W25Q32JV`. Both are 4MB with 256-byte pages and share the
+`READ_1_1_1` opcode, so the current declaration is very likely harmless in practice --
+but it does not match the silicon.
+
+**What v1.10.7 changed:** `gateware/colorlight.py` now instantiates `W25Q32JV`. Both parts share the
 `READ_1_1_1` opcode, a 256-byte page and 8 dummy bits, so only the size changes: the
 mapped region grows from 2MB to 4MB. The origin has to move with it: LiteX requires a
 region's origin be aligned to its size (`SoCRegion.decoder()` raises `SoCError` otherwise),
