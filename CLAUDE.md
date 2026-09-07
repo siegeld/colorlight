@@ -12,6 +12,8 @@
   at another site. jupiter has no A record for its 10.11.6.65 leg; `jupiter`
   resolves to its *other* NIC, 10.11.7.60. Don't name the flash host from the
   reverse lookup.
+- Read [TODO.md](TODO.md) for known defects and outstanding work — check it
+  before starting anything, it says what is already known to be broken
 - Read [README.md](README.md) for project docs, build commands, and usage
 - Read [ARCH.md](ARCH.md) for internals: memory map, double buffering, ISR design, key files
 - All builds go through `./build.sh` — run `./build.sh --help` for options
