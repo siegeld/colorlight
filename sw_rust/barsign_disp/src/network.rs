@@ -31,6 +31,10 @@ static mut NEIGHBOR_CACHE_ENTRIES: [Option<(smoltcp::wire::IpAddress, smoltcp::i
 
 // IP address storage - initialized at runtime
 static mut IP_ADDRS: MaybeUninit<[IpCidr; 1]> = MaybeUninit::uninit();
+/// Our IPv4, cached for the ISR's ARP filter. Zero until DHCP (or the static
+/// fallback) assigns one, and the filter is inert until then so we never drop
+/// the ARP exchange that brings the interface up.
+static mut OUR_IPV4: [u8; 4] = [0, 0, 0, 0];
 
 // Routes storage
 static mut ROUTES_STORAGE: [Option<(IpCidr, smoltcp::iface::Route)>; 1] = [None; 1];
@@ -115,6 +119,7 @@ static mut DBG_MULTICAST_DROPPED: u32 = 0;    // Multicast packets dropped
 
 // Slow path traffic breakdown
 static mut DBG_SLOW_ARP: u32 = 0;
+static mut DBG_ARP_DROPPED: u32 = 0;
 static mut DBG_SLOW_TCP: u32 = 0;
 static mut DBG_SLOW_UDP: u32 = 0;
 static mut DBG_SLOW_OTHER: u32 = 0;
@@ -394,6 +399,13 @@ pub extern "C" fn network_handler() {
                     process_raw_bitmap(frame);
                     eth.ack_rx();
                 }
+                Some(frame) if is_foreign_arp(frame) => {
+                    // Not our ARP: acknowledge and discard without waking
+                    // smoltcp, which would run the whole stack in this ISR.
+                    DBG_ARP_DROPPED += 1;
+                    batch_count += 1;
+                    eth.ack_rx();
+                }
                 Some(frame) if is_multicast(frame) => {
                     // Drop multicast packets (VRRP, mDNS, etc.) - we don't need them
                     DBG_MULTICAST_DROPPED += 1;
@@ -504,6 +516,7 @@ pub unsafe fn publish_hw_filter_mac(mac: &[u8; 6]) {
 
 pub unsafe fn publish_hw_filter_ip(ip: Ipv4Address) {
     let o = ip.0;
+    OUR_IPV4 = o;
     let v: u32 = ((o[0] as u32) << 24) | ((o[1] as u32) << 16) | ((o[2] as u32) << 8) | (o[3] as u32);
     let p = litex_pac::Peripherals::steal();
     p.ethmac.ip_address().write(|w| w.bits(v));
@@ -1050,7 +1063,7 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
     write!(resp, r#""fast_path":{},"slow_path":{},"max_batch":{},"#, dbg_fast, dbg_slow, dbg_batch).ok();
     write!(resp, r#""slow_arp":{},"slow_tcp":{},"slow_udp":{},"slow_other":{},"#,
         DBG_SLOW_ARP, DBG_SLOW_TCP, DBG_SLOW_UDP, DBG_SLOW_OTHER).ok();
-    write!(resp, r#""mcast_dropped":{},"#, DBG_MULTICAST_DROPPED).ok();
+    write!(resp, r#""mcast_dropped":{},"arp_dropped":{},"#, DBG_MULTICAST_DROPPED, DBG_ARP_DROPPED).ok();
     if !HUB75_PTR.is_null() {
         let (dpx, dch, dbad) = (*HUB75_PTR).dma_stats();
         // Read back what the hardware filters are actually matching against.
@@ -1395,6 +1408,31 @@ fn json_get_str<'a>(json: &'a str, key: &str) -> Option<&'a str> {
 /// Multicast: first byte LSB is 1 (01:xx:xx:xx:xx:xx)
 /// Broadcast: all ff (ff:ff:ff:ff:ff:ff) - we need this for DHCP
 #[inline]
+/// ARP that is not addressed to us.
+///
+/// The panel serves ARP through smoltcp on the SLOW path, inside the same
+/// interrupt handler that consumes the pixel stream, so every broadcast ARP on
+/// the segment is a short gap in frame processing -- visible as a periodic
+/// stutter in scrolling text. On a busy /24 almost all of it is asking about
+/// other hosts.
+///
+/// ARP for US is still handled: a request we fail to answer means the sender's
+/// cache expires and the stream stops entirely. Target protocol address sits at
+/// offset 38 (14 ethernet + 24 into the ARP body).
+pub fn is_foreign_arp(frame: &[u8]) -> bool {
+    if frame.len() < 42 {
+        return false;
+    }
+    if ((frame[12] as u16) << 8 | frame[13] as u16) != 0x0806 {
+        return false;
+    }
+    let ours = unsafe { OUR_IPV4 };
+    if ours == [0, 0, 0, 0] {
+        return false; // no address yet -- never filter during bring-up
+    }
+    frame[38..42] != ours
+}
+
 pub fn is_multicast(frame: &[u8]) -> bool {
     if frame.len() < 6 { return false; }
     // Check multicast bit

@@ -3,7 +3,7 @@
 <device schemaVersion="1.1" xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:noNamespaceSchemaLocation="CMSIS-SVD.xsd" >
     <vendor>litex</vendor>
     <name>SOC</name>
-    <description><![CDATA[Litex SoC 2026-09-07 06:21:30]]></description>
+    <description><![CDATA[Litex SoC 2026-09-07 06:58:04]]></description>
 
     <addressUnitBits>8</addressUnitBits>
     <width>32</width>
@@ -388,10 +388,145 @@ lines).]]></description>
                         </field>
                     </fields>
                 </register>
+                <register>
+                    <name>ARRIVAL0</name>
+                    <description><![CDATA[Chunk arrival bitmap word 0]]></description>
+                    <addressOffset>0x0024</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival0</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>ARRIVAL1</name>
+                    <description><![CDATA[Chunk arrival bitmap word 1]]></description>
+                    <addressOffset>0x0028</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival1</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>ARRIVAL2</name>
+                    <description><![CDATA[Chunk arrival bitmap word 2]]></description>
+                    <addressOffset>0x002c</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival2</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>ARRIVAL3</name>
+                    <description><![CDATA[Chunk arrival bitmap word 3]]></description>
+                    <addressOffset>0x0030</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival3</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>ARRIVAL4</name>
+                    <description><![CDATA[Chunk arrival bitmap word 4]]></description>
+                    <addressOffset>0x0034</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival4</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>ARRIVAL5</name>
+                    <description><![CDATA[Chunk arrival bitmap word 5]]></description>
+                    <addressOffset>0x0038</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival5</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>ARRIVAL6</name>
+                    <description><![CDATA[Chunk arrival bitmap word 6]]></description>
+                    <addressOffset>0x003c</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival6</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>ARRIVAL7</name>
+                    <description><![CDATA[Chunk arrival bitmap word 7]]></description>
+                    <addressOffset>0x0040</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>arrival7</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>FRAME_ID</name>
+                    <description><![CDATA[frame_id the arrival bitmap describes]]></description>
+                    <addressOffset>0x0044</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>frame_id</name>
+                            <msb>15</msb>
+                            <bitRange>[15:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
             </registers>
             <addressBlock>
                 <offset>0</offset>
-                <size>0x24</size>
+                <size>0x48</size>
                 <usage>registers</usage>
             </addressBlock>
         </peripheral>
@@ -2236,7 +2371,7 @@ register to disable individual events.]]></description>
             <constant name="CONFIG_CPU_NAME" value="vexriscv" />
             <constant name="CONFIG_CPU_HUMAN_NAME" value="VexRiscv_Lite" />
             <constant name="CONFIG_CPU_NOP" value="nop" />
-            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-09-07 06:19:19" />
+            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-09-07 06:55:42" />
             <constant name="FLASH_BOOT_ADDRESS" value="2152726528" />
             <constant name="SPIFLASH_PAGE_SIZE" value="256" />
             <constant name="CONFIG_L2_SIZE" value="8192" />

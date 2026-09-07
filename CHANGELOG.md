@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.11] - 2026-09-07
+
+### Fixed
+- **Broadcast ARP stalled the pixel stream.** The panel handled every ARP frame
+  on the segment through smoltcp on the SLOW path -- inside the same interrupt
+  handler that consumes streamed pixels -- so roughly one broadcast per second
+  became a short gap in frame processing, visible as a periodic stutter in
+  scrolling text. `is_foreign_arp()` now acks and discards ARP not addressed to
+  this panel in the fast path, without waking the network stack.
+
+  ARP *for* the panel is still handled: dropping it would let the sender's ARP
+  cache expire and stop the stream entirely, which is far worse than a stutter.
+  The filter is inert until an address is assigned, so it can never interfere
+  with bring-up. `arp_dropped` is published alongside `slow_arp` in
+  `/api/status`.
+
+  Measured on the bench panel: `slow_arp` 15,553 before; after, 1.0 foreign ARP
+  per second dropped in the fast path and **zero** reaching smoltcp.
+
+  This is a mitigation, not the cure -- the panels share a general-purpose /24
+  (`mcast_dropped` 1.4M, `mac_overflow` 806k). A dedicated panel VLAN removes
+  the broadcast domain instead of filtering it; recorded as TODO item 6.
+
+- **Art-Net colours had red and blue swapped.** `artnet.rs` packed
+  `0x00BBGGRR` where the framebuffer word is `0x00GGRRBB`. The v1.10.1
+  colour-order fix corrected `patterns.rs` and `bitmap_udp.rs` and missed this
+  file.
+
+- **Art-Net accepted anything.** Every header check -- magic, opcode, protocol
+  version -- was commented out, so ANY UDP datagram of 18 bytes or more
+  reaching that port was decoded as pixel data and written to the display.
+  Validation restored, with the length bounded against the packet.
+
+### Added
+- **Hardware chunk-arrival tracking (gateware).** `Hub75UdpDma` now sets a bit
+  in a 256-bit bitmap as each chunk *finishes writing*, exposed with the
+  frame_id it describes. This is the ground truth the CPU currently lacks: its
+  own mask counts packets it received, which is a different set from what the
+  DMA actually wrote, so a frame can be marked complete and shown with stale
+  bands.
+
+  **The firmware does not read these registers yet** -- the bitstream carries
+  them and the CPU still uses its own mask. Wiring it up is TODO item 1.
+
 ## [1.10.10] - 2026-09-07
 
 ### Fixed

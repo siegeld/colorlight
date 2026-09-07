@@ -121,6 +121,21 @@ class Hub75UdpDma(Module, AutoCSR):
         ])
         self.stalls = CSRStatus(32, description="Payloads abandoned after a DRAM stall")
 
+        # Which chunks the hardware ACTUALLY wrote, for the frame it is writing.
+        #
+        # Without this the CPU infers completion from packets it received, which
+        # is a different set: the always-ready gate drops whole packets under
+        # sustained load and the watchdog below abandons payloads when DRAM
+        # stalls. Neither is visible to the CPU, so it marked frames complete
+        # that had never been written and presented them with stale bands.
+        # These bits are set only when a chunk finishes writing.
+        self.arrival = [CSRStatus(32, name="arrival%d" % i,
+                                  description="Chunk arrival bitmap word %d" % i)
+                        for i in range(8)]
+        for i, csr in enumerate(self.arrival):
+            setattr(self, "arrival%d" % i, csr)
+        self.frame_id = CSRStatus(16, description="frame_id the arrival bitmap describes")
+
         sink = udp_sink
         hdr_idx = Signal(4)
         chunk_index = Signal(8)
@@ -138,6 +153,10 @@ class Hub75UdpDma(Module, AutoCSR):
         # pipeline is not recoverable.
         stall = Signal(max=stall_limit + 1)
         progress = Signal()
+        frame_id = Signal(16)
+        arrival = Signal(256)
+        set_arrival = Signal()
+        clear_arrival = Signal()
 
         # HUB75 framebuffer word format is 0x00GGRRBB.
         word = Signal(32)
@@ -147,6 +166,16 @@ class Hub75UdpDma(Module, AutoCSR):
             writer.sink.address.eq(pix_adr),
             writer.sink.data.eq(word),
         ]
+
+        self.sync += [
+            If(clear_arrival,
+                arrival.eq(0),
+            ).Elif(set_arrival,
+                arrival.eq(arrival | (1 << chunk_index)),
+            ),
+        ]
+        for i, csr in enumerate(self.arrival):
+            self.comb += csr.status.eq(arrival[32 * i:32 * (i + 1)])
 
         self.submodules.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
@@ -171,11 +200,18 @@ class Hub75UdpDma(Module, AutoCSR):
                     NextValue(self.bad_magic.status, self.bad_magic.status + 1),
                     NextState("DROP"),
                 ),
+                If(hdr_idx == 2, NextValue(frame_id[0:8], sink.data)),
+                If(hdr_idx == 3, NextValue(frame_id[8:16], sink.data)),
                 If(hdr_idx == 4,
                     NextValue(chunk_index, sink.data),
                     NextValue(self.last_chunk.status, sink.data),
                 ),
                 If(hdr_idx == 9,
+                    # New frame: the bitmap describes one frame at a time.
+                    If(frame_id != self.frame_id.status,
+                        clear_arrival.eq(1),
+                        NextValue(self.frame_id.status, frame_id),
+                    ),
                     # Header consumed; pixels start on the next beat.
                     NextValue(pix_adr, self.base.storage + chunk_index * pixels_per_chunk),
                     NextValue(sub, 0),
@@ -219,7 +255,12 @@ class Hub75UdpDma(Module, AutoCSR):
                     NextValue(self.pixels.status, self.pixels.status + 1),
                 ),
             ),
-            If(sink.valid & sink.ready & sink.last, NextState("IDLE")),
+            If(sink.valid & sink.ready & sink.last,
+                # Only now, having written the whole payload without a stall
+                # abort, is this chunk genuinely present in the framebuffer.
+                set_arrival.eq(1),
+                NextState("IDLE"),
+            ),
         )
         fsm.act("DROP",
             sink.ready.eq(1),

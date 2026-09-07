@@ -103,7 +103,27 @@ observable, and Tier 2 needs only 3.9-7.9 MB/s. It was not needed to make room.
 It remains the right lever for *panel count* and *refresh headroom* — worth doing
 when item 4 pushes past 8 panels, not before.
 
-## 6. Smaller known defects, none urgent
+## 6. Dedicated panel VLAN
+
+The panels sit on a general-purpose /24 and drown in broadcast traffic. Measured
+on the bench panel: `mcast_dropped` 1.4M, `slow_arp` 15.5k, `mac_overflow` 806k.
+Multicast is discarded cheaply in the fast path, but ARP went through smoltcp on
+the SLOW path -- inside the same interrupt handler that consumes the pixel
+stream -- so every broadcast ARP on the segment was a short gap in frame
+processing, visible as a periodic stutter in scrolling text.
+
+Mitigated in firmware (`is_foreign_arp`, v1.10.11): ARP not addressed to this
+panel is acked and discarded without waking the network stack. ARP *for* the
+panel is still handled -- dropping it would let the sender's cache expire and
+kill the stream.
+
+**That is the tactical fix. The real one is a dedicated panel VLAN**, which
+removes the broadcast domain rather than filtering it, and also lets the panels
+be addressed independently of the general estate. Marquee stores each panel's
+address in the database and hardcodes nothing, so the move is a re-address plus
+DHCP option 66 pointing at whichever host runs Marquee.
+
+## 7. Smaller known defects, none urgent
 
 - **Art-Net colour order is wrong.** `artnet.rs` still packs `0x00BBGGRR`; the
   v1.10.1 colour fix corrected `patterns.rs` and `bitmap_udp.rs` and missed this
