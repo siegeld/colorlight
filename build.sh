@@ -27,6 +27,7 @@ BITSTREAM="${BUILD_DIR}/gateware/colorlight_5a_75e.bit"
 FIRMWARE_DIR="sw_rust/barsign_disp"
 FIRMWARE_BIN="${FIRMWARE_DIR}/target/riscv32i-unknown-none-elf/release/barsign-disp"
 TFTP_DIR="${SCRIPT_DIR}/.tftp"
+TFTP_PORT=6969
 # Must match FLASH_BOOT_ADDRESS in gateware/colorlight.py (spiflash origin + 0x100000)
 FLASH_BOOT_OFFSET="0x100000"
 ALLOW_STALE=0
@@ -356,6 +357,35 @@ is_tftp_running() {
     return 1
 }
 
+# Is ANYTHING listening on the TFTP port, ours or not?
+#
+# is_tftp_running() only ever knew about the server this tree started, tracked
+# through a pid file inside this tree. A server started by another checkout --
+# or by a pre-v1.3.0 build.sh, which used dnsmasq instead of tftpd.py -- was
+# invisible to both `stop` and `ensure`, so `ensure` would cheerfully start
+# another alongside it. Eighteen accumulated on the flash host and ran for seven
+# months. A server you cannot see is a server you cannot prove is serving the
+# binary you just built, which is the whole stale-artifact trap this project has
+# already lost a night to.
+tftp_port_busy() {
+    # Local Address:Port is field 4 -- field 5 is the PEER address, and matching
+    # that finds nothing, ever. `ss -uln` prints five fields per data row even
+    # though the header reads as six columns.
+    ss -uln 2>/dev/null | grep -qE "^[^ ]+([ ]+[^ ]+){2}[ ]+[^ ]*:${TFTP_PORT}[ ]"
+}
+
+# Orphaned TFTP daemons from ANY colorlight checkout, however they were started.
+# Matched on the tftp-root path so nothing unrelated on the host is touched.
+legacy_tftp_pids() {
+    local pid
+    for pid in $(pgrep -x dnsmasq 2>/dev/null) $(pgrep -f 'tools/tftpd\.py' 2>/dev/null); do
+        [[ "${pid}" == "$$" ]] && continue
+        if tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | grep -q 'colorlight/\.tftp'; then
+            echo "${pid}"
+        fi
+    done | sort -u
+}
+
 stop_tftp() {
     if is_tftp_running; then
         local pid=$(cat "${TFTP_DIR}/tftpd.pid" 2>/dev/null)
@@ -363,6 +393,23 @@ stop_tftp() {
         kill "${pid}" 2>/dev/null || true
         rm -f "${TFTP_DIR}/tftpd.pid"
         sleep 1
+    fi
+
+    # Reap TFTP daemons from other checkouts / older build.sh versions too.
+    # Without this they simply accumulate, one per `boot`, forever.
+    local orphans
+    orphans=$(legacy_tftp_pids)
+    if [[ -n "${orphans}" ]]; then
+        print_warning "Orphaned colorlight TFTP daemons: $(echo ${orphans} | tr '\n' ' ')"
+        # shellcheck disable=SC2086
+        kill ${orphans} 2>/dev/null || sudo -n kill ${orphans} 2>/dev/null || true
+        sleep 1
+        orphans=$(legacy_tftp_pids)
+        if [[ -n "${orphans}" ]]; then
+            # shellcheck disable=SC2086
+            kill -9 ${orphans} 2>/dev/null || sudo -n kill -9 ${orphans} 2>/dev/null || true
+        fi
+        print_success "Orphaned TFTP daemons cleared"
     fi
 }
 
@@ -388,6 +435,33 @@ ensure_tftp() {
         return 0
     fi
 
+    # Not ours, but something owns the port. Starting a second server here is
+    # the bug that let daemons pile up: both bind, the kernel hands datagrams to
+    # whichever it likes, and the board silently boots whatever the OTHER one is
+    # serving. Refuse and say so instead.
+    if tftp_port_busy; then
+        local orphans holder
+        orphans=$(legacy_tftp_pids)
+        if [[ -n "${orphans}" ]]; then
+            print_error "UDP port ${TFTP_PORT} held by an orphaned colorlight TFTP daemon"
+            print_error "  PIDs: $(echo ${orphans} | tr '\n' ' ')"
+            print_warning "Run './build.sh stop' to clear it, then retry"
+            return 1
+        fi
+        # Not ours. Most likely Marquee, which now owns panel TFTP on the flash
+        # host: /srv/docker/marquee serves per-panel boot.bin and <mac>.yml from
+        # its database on this same port, deliberately (the gateware sets
+        # TFTP_SERVER_PORT=6969). That is the supported path -- firmware rollout
+        # is a fleet operation with a record of what each panel booted, rather
+        # than a script serving out of somebody's checkout. Do NOT kill it.
+        holder=$(sudo -n ss -ulnp 2>/dev/null | grep ":${TFTP_PORT} " \
+                 | grep -oP 'users:\(\("\K[^"]+' | head -1)
+        print_warning "UDP port ${TFTP_PORT} is owned by another service${holder:+ (${holder})}"
+        print_warning "Marquee serves panel TFTP on this host; publish firmware there"
+        print_warning "instead of serving it from this tree. Skipping local TFTP."
+        return 1
+    fi
+
     # Need boot.bin to serve
     if [[ ! -f "${TFTP_DIR}/boot.bin" ]]; then
         print_warning "No boot.bin — skipping TFTP server"
@@ -405,7 +479,7 @@ ensure_tftp() {
     mkdir -p "${TFTP_DIR}"
     print_step "Starting TFTP server on ${HOST_IP}"
     python3 "${SCRIPT_DIR}/tools/tftpd.py" \
-        --root "${TFTP_DIR}" --host "0.0.0.0" --port 6969 \
+        --root "${TFTP_DIR}" --host "0.0.0.0" --port "${TFTP_PORT}" \
         --log "${TFTP_DIR}/tftpd.log" \
         --pid "${TFTP_DIR}/tftpd.pid" &
     disown
