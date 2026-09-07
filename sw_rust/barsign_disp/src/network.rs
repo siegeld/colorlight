@@ -870,7 +870,7 @@ unsafe fn page_status(resp: &mut HttpResponse, ip: [u8; 4]) {
     write!(resp, "\
 <!DOCTYPE html><html><head>\
 <meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>\
-<link rel=icon href='data:,'><title>Colorlight {}</title>\
+<link rel=icon href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'><rect width='8' height='8' rx='1.5' fill='%23111'/><rect x='1' y='1' width='2.4' height='2.4' rx='.5' fill='%23e04b4b'/><rect x='4.6' y='1' width='2.4' height='2.4' rx='.5' fill='%234bd07a'/><rect x='1' y='4.6' width='2.4' height='2.4' rx='.5' fill='%234b8fe0'/><rect x='4.6' y='4.6' width='2.4' height='2.4' rx='.5' fill='%23e0c34b'/></svg>\"><title>Colorlight {}</title>\
 <style>\
 *{{margin:0;box-sizing:border-box}}\
 body{{font:15px/1.5 system-ui,sans-serif;background:#0a0a0f;color:#c0c0c8;padding:24px}}\

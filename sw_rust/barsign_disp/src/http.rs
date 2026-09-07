@@ -108,7 +108,12 @@ impl HttpRequest {
 // ── Response Writer ─────────────────────────────────────────────
 
 pub struct HttpResponse {
-    pub data: heapless::Vec<u8, 6144>,
+    /// 8 KiB, not 6: the status page renders ~137 fields into one buffer and
+    /// every write goes through `.ok()`, so an overflow does not fail -- it
+    /// silently truncates the HTML mid-tag and the page just renders wrong.
+    /// Literals alone are ~3.6 KiB; the counters grow with uptime. Two
+    /// instances, so this costs 4 KiB of a board that has megabytes spare.
+    pub data: heapless::Vec<u8, 8192>,
 }
 
 impl HttpResponse {
