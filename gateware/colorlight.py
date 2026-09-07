@@ -54,6 +54,7 @@ from litespi import LiteSPI
 from smoleth import SmolEth  # Provides MAC access for CPU (telnet, ARP handled in firmware)
 
 import hub75
+from dma_writer import SdramWriteTester
 
 # from artnet2ram import Artnet2RAM  # TODO: Re-add Art-Net hardware support
 
@@ -260,6 +261,15 @@ class BaseSoC(SoCCore):
             n_outputs=n_outputs,
             chain_length_2=chain_length_2
         )
+
+        # SDRAM write-path measurement (Tier 2).
+        #
+        # The display read path measures ~79 MB/s, near the ceiling for a 16-bit
+        # SDRAM at 40 MHz. Before building a UDP-fed write DMA it is worth
+        # knowing what write bandwidth is actually left and what claiming it
+        # costs the refresh rate. This engine answers both directly.
+        self.submodules.dmatest = SdramWriteTester(self.sdram)
+        self.add_csr("dmatest")
 
         # Ethernet / Etherbone ---------------------------------------------------------------------
         # Use phy0

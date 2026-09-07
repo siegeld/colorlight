@@ -218,6 +218,16 @@ impl Hub75 {
         (width, self.length)
     }
 
+    /// Completed framebuffer refreshes since reset.
+    ///
+    /// The display DMA re-reads the WHOLE framebuffer every refresh, so
+    /// sampling this over a known interval gives the true refresh rate, and from
+    /// it the SDRAM read bandwidth the display is actually achieving. That
+    /// number decides how much headroom a write DMA can have.
+    pub fn refresh_count(&self) -> u32 {
+        self.hub75.refresh_count().read().bits()
+    }
+
     pub fn get_panel_params(&self) -> impl Iterator<Item = u32> + '_ {
         use pac::hub75::Panel0_0;
         let panel_adr = self.hub75.panel0_0() as *const Panel0_0 as *const u32;

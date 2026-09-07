@@ -3,7 +3,7 @@
 <device schemaVersion="1.1" xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:noNamespaceSchemaLocation="CMSIS-SVD.xsd" >
     <vendor>litex</vendor>
     <name>SOC</name>
-    <description><![CDATA[Litex SoC 2026-09-06 21:48:16]]></description>
+    <description><![CDATA[Litex SoC 2026-09-07 05:30:06]]></description>
 
     <addressUnitBits>8</addressUnitBits>
     <width>32</width>
@@ -147,8 +147,110 @@ lines).]]></description>
             </addressBlock>
         </peripheral>
         <peripheral>
-            <name>CTRL</name>
+            <name>DMATEST</name>
             <baseAddress>0xF0001000</baseAddress>
+            <groupName>DMATEST</groupName>
+            <registers>
+                <register>
+                    <name>BASE</name>
+                    <description><![CDATA[First word address of the burst]]></description>
+                    <addressOffset>0x0000</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>base</name>
+                            <msb>23</msb>
+                            <bitRange>[23:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>LENGTH</name>
+                    <description><![CDATA[Words to write in the burst]]></description>
+                    <addressOffset>0x0004</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>length</name>
+                            <msb>23</msb>
+                            <bitRange>[23:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>CTRL</name>
+                    <addressOffset>0x0008</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>start</name>
+                            <msb>0</msb>
+                            <bitRange>[0:0]</bitRange>
+                            <lsb>0</lsb>
+                            <description><![CDATA[Write 1 to arm a burst (self-clearing)]]></description>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>STATUS</name>
+                    <addressOffset>0x000c</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>busy</name>
+                            <msb>0</msb>
+                            <bitRange>[0:0]</bitRange>
+                            <lsb>0</lsb>
+                            <description><![CDATA[Burst in progress]]></description>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>CYCLES</name>
+                    <description><![CDATA[Sys-clk cycles taken by the last burst]]></description>
+                    <addressOffset>0x0010</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>cycles</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+                <register>
+                    <name>WRITTEN</name>
+                    <description><![CDATA[Words written by the last burst]]></description>
+                    <addressOffset>0x0014</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>written</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
+            </registers>
+            <addressBlock>
+                <offset>0</offset>
+                <size>0x18</size>
+                <usage>registers</usage>
+            </addressBlock>
+        </peripheral>
+        <peripheral>
+            <name>CTRL</name>
+            <baseAddress>0xF0001800</baseAddress>
             <groupName>CTRL</groupName>
             <registers>
                 <register>
@@ -214,7 +316,7 @@ to the Wishbone/CSR bus are working correctly. The initial reset value of
         </peripheral>
         <peripheral>
             <name>ETHMAC</name>
-            <baseAddress>0xF0001800</baseAddress>
+            <baseAddress>0xF0002000</baseAddress>
             <groupName>ETHMAC</groupName>
             <registers>
                 <register>
@@ -488,7 +590,7 @@ register to disable individual events.]]></description>
         </peripheral>
         <peripheral>
             <name>ETHPHY</name>
-            <baseAddress>0xF0002000</baseAddress>
+            <baseAddress>0xF0002800</baseAddress>
             <groupName>ETHPHY</groupName>
             <registers>
                 <register>
@@ -587,7 +689,7 @@ register to disable individual events.]]></description>
         </peripheral>
         <peripheral>
             <name>HUB75_PALETTE</name>
-            <baseAddress>0xF0002800</baseAddress>
+            <baseAddress>0xF0003000</baseAddress>
             <groupName>HUB75_PALETTE</groupName>
             <registers>
                 <register>
@@ -614,7 +716,7 @@ register to disable individual events.]]></description>
         </peripheral>
         <peripheral>
             <name>HUB75</name>
-            <baseAddress>0xF0003000</baseAddress>
+            <baseAddress>0xF0003800</baseAddress>
             <groupName>HUB75</groupName>
             <registers>
                 <register>
@@ -1054,16 +1156,31 @@ register to disable individual events.]]></description>
                         </field>
                     </fields>
                 </register>
+                <register>
+                    <name>REFRESH_COUNT</name>
+                    <description><![CDATA[Completed framebuffer refreshes]]></description>
+                    <addressOffset>0x0044</addressOffset>
+                    <resetValue>0x00</resetValue>
+                    <size>32</size>
+                    <fields>
+                        <field>
+                            <name>refresh_count</name>
+                            <msb>31</msb>
+                            <bitRange>[31:0]</bitRange>
+                            <lsb>0</lsb>
+                        </field>
+                    </fields>
+                </register>
             </registers>
             <addressBlock>
                 <offset>0</offset>
-                <size>0x44</size>
+                <size>0x48</size>
                 <usage>registers</usage>
             </addressBlock>
         </peripheral>
         <peripheral>
             <name>IDENTIFIER_MEM</name>
-            <baseAddress>0xF0003800</baseAddress>
+            <baseAddress>0xF0004000</baseAddress>
             <groupName>IDENTIFIER_MEM</groupName>
             <registers>
                 <register>
@@ -1090,7 +1207,7 @@ register to disable individual events.]]></description>
         </peripheral>
         <peripheral>
             <name>SDRAM</name>
-            <baseAddress>0xF0004000</baseAddress>
+            <baseAddress>0xF0004800</baseAddress>
             <groupName>SDRAM</groupName>
             <registers>
                 <register>
@@ -1278,7 +1395,7 @@ register to disable individual events.]]></description>
         </peripheral>
         <peripheral>
             <name>TIMER0</name>
-            <baseAddress>0xF0004800</baseAddress>
+            <baseAddress>0xF0005000</baseAddress>
             <groupName>TIMER0</groupName>
             <registers>
                 <register>
@@ -1424,7 +1541,7 @@ register to disable individual events.]]></description>
         </peripheral>
         <peripheral>
             <name>UART</name>
-            <baseAddress>0xF0005000</baseAddress>
+            <baseAddress>0xF0005800</baseAddress>
             <groupName>UART</groupName>
             <registers>
                 <register>
@@ -1731,7 +1848,7 @@ register to disable individual events.]]></description>
             <constant name="CONFIG_CPU_NAME" value="vexriscv" />
             <constant name="CONFIG_CPU_HUMAN_NAME" value="VexRiscv_Lite" />
             <constant name="CONFIG_CPU_NOP" value="nop" />
-            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-09-06 21:46:04" />
+            <constant name="CONFIG_IDENTIFIER" value="LiteX SoC on Colorlight 5A-75E 2026-09-07 05:28:47" />
             <constant name="FLASH_BOOT_ADDRESS" value="2152726528" />
             <constant name="SPIFLASH_PAGE_SIZE" value="256" />
             <constant name="CONFIG_L2_SIZE" value="8192" />

@@ -78,6 +78,12 @@ class Hub75(Module, AutoCSR):
             columns=columns, rows_per_half=rows_per_half, scan=scan,
             chain_length_2=chain_length_2, n_outputs=n_outputs
         )
+        # Completed refreshes since reset. Read twice over a known interval to
+        # get the true refresh rate, and from it the read bandwidth actually
+        # achieved -- which decides whether a write DMA has any headroom.
+        self.refresh_count = CSRStatus(32, description="Completed framebuffer refreshes")
+        self.sync += self.refresh_count.status.eq(self.refresh_count.status + self.common.refresh_tick)
+
         self.palette_memory = self.specific.palette_memory
 
 
@@ -99,6 +105,11 @@ class FrameController(Module):
     ):
         self.start_shifting = start_shifting = Signal(1)
         self.shifting_done = shifting_done = Signal(1)
+        # Pulses once per completed refresh (row counter wrapping back to 0).
+        # Instrumentation: the display DMA re-reads the WHOLE framebuffer every
+        # refresh, so the achieved refresh rate is what tells us how much SDRAM
+        # bandwidth the read side is actually getting.
+        self.refresh_tick = refresh_tick = Signal()
         self.clk = outputs_common.clk
         counter_max = 8
 
@@ -131,6 +142,7 @@ class FrameController(Module):
                         # Wrap row counter at scan rate (e.g., 24 for 1/24 scan)
                         If(row_shifting >= (scan - 1),
                             NextValue(row_shifting, 0),
+                            refresh_tick.eq(1),
                         ).Else(
                             NextValue(row_shifting, row_shifting + 1),
                         ),

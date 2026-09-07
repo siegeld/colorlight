@@ -755,6 +755,7 @@ unsafe fn handle_http_request(req: &HttpRequest, resp: &mut HttpResponse, ip: [u
         (Method::Get, "/api/layout") => api_layout_get(resp),
         (Method::Get, "/api/display") => api_display_get(resp),
         (Method::Get, "/api/bitmap/stats") => api_bitmap_stats(resp),
+        (Method::Get, "/api/dmatest") => api_dmatest(resp),
         (Method::Post, "/api/display/on") => api_display_on(resp),
         (Method::Post, "/api/display/off") => api_display_off(resp),
         (Method::Post, "/api/display/pattern") => api_display_pattern(req, resp),
@@ -1012,6 +1013,9 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
     write!(resp, r#""slow_arp":{},"slow_tcp":{},"slow_udp":{},"slow_other":{},"#,
         DBG_SLOW_ARP, DBG_SLOW_TCP, DBG_SLOW_UDP, DBG_SLOW_OTHER).ok();
     write!(resp, r#""mcast_dropped":{},"#, DBG_MULTICAST_DROPPED).ok();
+    if !HUB75_PTR.is_null() {
+        write!(resp, r#""refresh_count":{},"#, (*HUB75_PTR).refresh_count()).ok();
+    }
     write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{},"#,
         mac_ovf, mac_crc, mac_pre).ok();
     // Crash breadcrumb: how far execution got before the PREVIOUS boot ended.
@@ -1023,6 +1027,70 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
         crate::breadcrumb::count()).ok();
     write!(resp, r#","prev_mcause":{},"prev_mepc":{}}}"#,
         crate::breadcrumb::prev_mcause(), crate::breadcrumb::prev_mepc()).ok();
+}
+
+/// Measure achievable SDRAM write bandwidth, and what it costs the display.
+///
+/// Arms a hardware burst through LiteDRAMDMAWriter and reports the cycles it
+/// took, alongside the refresh counter sampled either side. Words/cycle at the
+/// system clock gives write bandwidth directly; the refresh delta gives the
+/// price the display pays. This is the measurement that decides whether a
+/// UDP-fed write DMA (Tier 2) has room to exist.
+unsafe fn api_dmatest(resp: &mut HttpResponse) {
+    use core::fmt::Write;
+    let p = litex_pac::Peripherals::steal();
+    let dma = p.dmatest;
+
+    // Scratch area well clear of the framebuffer (which occupies byte
+    // 0x200000-0x280000, i.e. word 0x80000-0xA0000).
+    // SDRAM is 1M words; the framebuffer occupies words 0x80000-0xA0000, so
+    // 0xA0000 upward is free scratch. 8 x 256k words is long enough (~100ms of
+    // sustained writing) to measure the refresh cost against a 200Hz display.
+    // Word 0xA8000 holds the crash breadcrumb (byte 0x2A0000), and the
+    // framebuffer occupies 0x80000-0xA0000. Start above both. Verified the hard
+    // way: an earlier base of 0xA0000 marched through the breadcrumb and left
+    // its address-pattern data there -- which incidentally proved the DMA writes
+    // correct data to correct addresses.
+    const SCRATCH_WORD_BASE: u32 = 0x0B_0000;
+    const BURST_WORDS: u32 = 262144;
+    const REPEATS: u32 = 8;
+
+    let refresh_before = if !HUB75_PTR.is_null() { (*HUB75_PTR).refresh_count() } else { 0 };
+    let t_before = TIME_MS;
+
+    let mut guard: u32 = 0;
+    let mut cycles: u64 = 0;
+    let mut written: u64 = 0;
+    for _ in 0..REPEATS {
+        dma.base().write(|w| w.bits(SCRATCH_WORD_BASE));
+        dma.length().write(|w| w.bits(BURST_WORDS));
+        dma.ctrl().write(|w| w.start().set_bit());
+        // Bounded spin -- a wedged DMA must not hang us the way the old
+        // unbounded UART wait in panic.rs did.
+        loop {
+            if !dma.status().read().busy().bit_is_set() {
+                break;
+            }
+            guard += 1;
+            if guard > 40_000_000 {
+                break;
+            }
+        }
+        dma.ctrl().write(|w| w.start().clear_bit());
+        cycles += dma.cycles().read().bits() as u64;
+        written += dma.written().read().bits() as u64;
+    }
+    let cycles = cycles as u32;
+    let written = written as u32;
+    let refresh_after = if !HUB75_PTR.is_null() { (*HUB75_PTR).refresh_count() } else { 0 };
+    let t_after = TIME_MS;
+
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+    write!(resp, r#"{{"burst_words":{},"cycles":{},"written":{},"guard":{},"#,
+        BURST_WORDS * REPEATS, cycles, written, guard).ok();
+    write!(resp, r#""refresh_before":{},"refresh_after":{},"elapsed_ms":{}}}"#,
+        refresh_before, refresh_after, (t_after - t_before) as i32).ok();
 }
 
 unsafe fn api_layout_get(resp: &mut HttpResponse) {
