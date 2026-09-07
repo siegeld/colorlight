@@ -174,6 +174,8 @@ impl Hub75 {
             FB_BASE_WORDS
         };
         unsafe { self.hub75.fb_base().write(|w| w.offset().bits(base)) };
+        // The DMA writes into the CPU's back buffer, which just changed.
+        self.update_dma_base();
     }
 
     /// Read pixel data from the front buffer (what's currently displayed)
@@ -205,6 +207,49 @@ impl Hub75 {
                     self.hub75_data[idx] = 0;
                 }
             }
+        }
+    }
+
+    /// Point the hardware pixel DMA at the current BACK buffer.
+    ///
+    /// Tier 2: streamed pixels are written to SDRAM by gateware, not by the CPU.
+    /// The DMA must always target the buffer the CPU is filling, so this is
+    /// called on every swap. Word address is relative to SDRAM base, which is
+    /// what the gateware crossbar port addresses.
+    pub fn update_dma_base(&self) {
+        let word = ((self.hub75_data.as_ptr() as usize - 0x9000_0000) / 4) as u32;
+        unsafe {
+            let p = litex_pac::Peripherals::steal();
+            p.pixdma.base().write(|w| w.bits(word));
+        }
+    }
+
+    /// Enable/disable hardware pixel writes, and publish the image bound the
+    /// DMA clamps against so a malformed chunk cannot write past the buffer.
+    pub fn set_dma_enabled(&mut self, on: bool) {
+        let limit = (self.length as usize).min(self.hub75_data.len()) as u32;
+        unsafe {
+            let p = litex_pac::Peripherals::steal();
+            p.pixdma.limit().write(|w| w.bits(limit));
+            p.pixdma.ctrl().write(|w| w.enable().bit(on));
+        }
+        self.update_dma_base();
+    }
+
+    pub fn dma_enabled(&self) -> bool {
+        unsafe {
+            let p = litex_pac::Peripherals::steal();
+            p.pixdma.ctrl().read().enable().bit_is_set()
+        }
+    }
+
+    /// (pixels, chunks, bad_magic) written by the hardware DMA.
+    pub fn dma_stats(&self) -> (u32, u32, u32) {
+        unsafe {
+            let p = litex_pac::Peripherals::steal();
+            (p.pixdma.pixels().read().bits(),
+             p.pixdma.chunks().read().bits(),
+             p.pixdma.bad_magic().read().bits())
         }
     }
 

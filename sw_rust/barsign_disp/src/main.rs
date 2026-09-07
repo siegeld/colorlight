@@ -170,6 +170,8 @@ fn main() -> ! {
     // Read flash unique ID before Flash takes ownership of SPI peripheral
     let unique_id = flash_id::read_flash_unique_id(&peripherals.spiflash_mmap);
     let mac_bytes = flash_id::derive_mac(&unique_id);
+    // Tell the gateware's hardware UDP filter which MAC to accept.
+    unsafe { network::publish_hw_filter_mac(&mac_bytes) };
 
     let mut flash = img_flash::Flash::new(peripherals.spiflash_mmap);
     // Print startup info

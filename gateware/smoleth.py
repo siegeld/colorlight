@@ -204,7 +204,19 @@ class SmolEthStreamSplitter(Module):
 
 
 class SmolEth(Module, AutoCSR):
-    def __init__(self, phy, udp_port, mac_address, ip_address, dw):
+    def __init__(self, phy, udp_port, mac_address, ip_address, dw,
+                 nrxslots=2, ntxslots=2, with_hw_udp=False):
+        """MAC for the CPU, optionally with a hardware UDP receive path.
+
+        with_hw_udp splits the post-MAC RX stream: one copy goes to the CPU as
+        before, the other through MAC/IP/UDP filters in gateware, exposing
+        `self.udp_source` -- a payload stream for `udp_port` with no CPU
+        involvement. That is the ingest half of taking pixels off the CPU.
+
+        The hardware branch must never stall: the splitter only advances when
+        BOTH consumers have taken a beat, so a blocked hardware path would
+        backpressure the CPU's path and cost packets. See AlwaysReady below.
+        """
         assert dw % 8 == 0
         # Add mac & ip registers
         self.ip_address = CSRStorage(32, reset=ip_address, atomic_write=True)
@@ -216,9 +228,6 @@ class SmolEth(Module, AutoCSR):
             with_sys_datapath=True,
             with_preamble_crc=True,
         )
-
-        nrxslots = 2
-        ntxslots = 2
 
         # Wishbone MAC
         self.rx_slots = CSRConstant(nrxslots)
@@ -241,12 +250,114 @@ class SmolEth(Module, AutoCSR):
             + [self.ip_address, self.mac_address]
         )
 
-        # SIMPLIFIED: Direct connection to CPU, no hardware filtering
-        # This bypasses splitter/invalidator/mac_filter to debug basic ethernet
-        self.comb += [
-            self.core.source.connect(self.interface.sink),  # PHY RX → CPU
-            self.interface.source.connect(self.core.sink),  # CPU TX → PHY
-        ]
+        # CPU TX path is unconditional.
+        self.comb += self.interface.source.connect(self.core.sink)
+
+        if not with_hw_udp:
+            # Straight through to the CPU, as before.
+            self.comb += self.core.source.connect(self.interface.sink)
+        else:
+            # Duplicate the RX stream: one copy to the CPU, one to gateware.
+            self.submodules.splitter = splitter = SmolEthStreamSplitter(
+                eth_phy_description(dw))
+            self.comb += self.core.source.connect(splitter.sink)
+            self.comb += splitter.source1.connect(self.interface.sink)
+
+            # Never let the hardware branch backpressure the CPU branch.
+            self.submodules.gate = gate = AlwaysReady(eth_phy_description(dw))
+            self.comb += splitter.source2.connect(gate.sink)
+
+            # Narrow the hardware branch to 8 bits. The MAC and the CPU's
+            # wishbone interface need dw=32, but the 10-byte header is not a
+            # multiple of 4, so parsing at 32 bits leaves every RGB triple
+            # straddling beats at a 2-byte offset. At 8 bits it is a plain
+            # byte-wise FSM, and 1 byte/cycle at 40MHz is 40 MB/s against a
+            # 12.5 MB/s line rate -- three times the headroom needed.
+            # Absorb intra-packet bursts. Sustained rate is fine (12.5 MB/s of
+            # line rate against 40 MB/s of 8-bit datapath at 40MHz), but the MAC
+            # core delivers a packet faster than the 32->8 converter drains it,
+            # and every beat the converter refuses costs a whole packet.
+            self.submodules.burst_fifo = burst_fifo = stream.SyncFIFO(
+                eth_phy_description(dw), 512, buffered=True)
+            self.comb += gate.source.connect(burst_fifo.sink)
+
+            # Explicit byte serializer, NOT stream.StrideConverter.
+            #
+            # StrideConverter splits the RAW BIT VECTOR of the whole payload:
+            # eth_phy_description(32) is data[32] + last_be[4] + error[4] = 40
+            # bits, chopped into 4 x 10-bit chunks that do not land on byte
+            # boundaries of `data`. Measured on hardware: a frame whose real
+            # destination MAC was 01:00:5e:00:00:fb parsed as 5e:00:00:fb:01:00
+            # -- bytes emerging in b2 b3 b4 b5 b0 b1 order.
+            self.submodules.narrow = narrow = Bytes32to8()
+            self.comb += burst_fifo.source.connect(narrow.sink)
+
+            # Filter against the RUNTIME CSRs, not the build-time constants.
+            # The firmware derives its MAC from the flash unique ID and gets its
+            # IP from DHCP, so the compiled-in values (0x10e2d5000001 /
+            # 10.11.6.250) match nothing on the wire and the hardware path sees
+            # no packets at all. These CSRs already existed for this purpose.
+            self.submodules.mac_filter = mac_filter = SmolEthMACFilter(
+                self.mac_address.storage, 8)
+            self.submodules.ip = ip = SmolEthIP(
+                self.ip_address.storage, udp_protocol, 8)
+            self.submodules.udp = udp = SmolEthUDP(udp_port, 8)
+            self.comb += [
+                narrow.source.connect(mac_filter.sink),
+                mac_filter.source.connect(ip.sink),
+                ip.source.connect(udp.sink),
+            ]
+            self.udp_source = udp.source
+            self.dropped_packets = gate.dropped
+
+            # Per-stage packet counters. The hardware path is a pipeline of
+            # filters, each of which silently drops anything it does not match,
+            # so "nothing arrives at the end" gives no clue which stage is
+            # rejecting. One counter per stage turns that into a single reading.
+            # What is the MAC depacketizer actually parsing? If the byte order
+            # through the 32->8 conversion is wrong, every header field is
+            # scrambled and the filter rejects everything with no other clue.
+            self.dbg_mac = CSRStatus(48, description="Last parsed destination MAC")
+            self.dbg_ethertype = CSRStatus(16, description="Last parsed ethertype")
+            self.sync += If(mac_filter.depacketizer.source.valid,
+                self.dbg_mac.status.eq(mac_filter.depacketizer.source.target_mac),
+                self.dbg_ethertype.status.eq(mac_filter.depacketizer.source.ethernet_type))
+            self.csrs += [self.dbg_mac, self.dbg_ethertype]
+
+            # Beat-level counters upstream: a packet counter reads zero both when
+            # nothing arrives and when packets arrive but never complete, and
+            # those need telling apart.
+            self.c_core = CSRStatus(32, description="Beats out of the MAC core")
+            self.c_split2 = CSRStatus(32, description="Beats into the hardware branch")
+            self.c_gate_out = CSRStatus(32, description="Beats out of the gate")
+            self.c_narrow_out = CSRStatus(32, description="Beats out of the 32->8 converter")
+            self.c_dropped = CSRStatus(32, description="Packets dropped by the gate")
+            for csr, ep in [
+                (self.c_core, self.core.source),
+                (self.c_split2, splitter.source2),
+                (self.c_gate_out, gate.source),
+                (self.c_narrow_out, narrow.source),
+            ]:
+                self.sync += If(ep.valid & ep.ready, csr.status.eq(csr.status + 1))
+            self.comb += self.c_dropped.status.eq(gate.dropped)
+            self.csrs += [self.c_core, self.c_split2, self.c_gate_out,
+                          self.c_narrow_out, self.c_dropped]
+
+            self.n_gate = CSRStatus(32, description="Packets leaving the always-ready gate")
+            self.n_narrow = CSRStatus(32, description="Packets leaving the 32->8 converter")
+            self.n_mac = CSRStatus(32, description="Packets passing the MAC filter")
+            self.n_ip = CSRStatus(32, description="Packets passing the IP filter")
+            self.n_udp = CSRStatus(32, description="Payloads passing the UDP port filter")
+            for csr, ep in [
+                (self.n_gate, gate.source),
+                (self.n_narrow, narrow.source),
+                (self.n_mac, mac_filter.source),
+                (self.n_ip, ip.source),
+                (self.n_udp, udp.source),
+            ]:
+                self.sync += If(ep.valid & ep.ready & ep.last,
+                                csr.status.eq(csr.status + 1))
+            self.csrs += [self.n_gate, self.n_narrow, self.n_mac, self.n_ip, self.n_udp]
 
     def get_csrs(self):
         return self.csrs
@@ -302,3 +413,128 @@ class SmolEthInvalidator(Module):
             self.sink.ready.eq(1),
             If(self.sink.valid & self.sink.last, NextState("IDLE")),
         )
+
+
+class AlwaysReady(Module):
+    """Never backpressures upstream, and never truncates a packet downstream.
+
+    The stream splitter only advances when every consumer has taken the beat, so
+    a hardware consumer that stalls throttles the CPU's copy of the traffic. This
+    guarantees sink.ready and drops instead.
+
+    The subtlety, learned the hard way: simply ceasing to forward mid-packet
+    leaves every downstream FSM waiting for a `last` that never comes, and the
+    whole pipeline deadlocks after the first stalled packet. Measured as 288
+    beats forwarded out of 115,057 before everything stopped. So when a drop
+    starts mid-packet we still emit one final beat with `last` set, which lets
+    the depacketizers unwind and reject the short frame on their own length
+    checks.
+    """
+
+    def __init__(self, description):
+        self.sink = sink = stream.Endpoint(description)
+        self.source = source = stream.Endpoint(description)
+        self.dropped = Signal(32)
+
+        in_packet = Signal()
+        dropping = Signal()
+        need_last = Signal()
+
+        self.comb += [
+            # Upstream is never held up.
+            sink.ready.eq(1),
+            sink.connect(source, omit={"valid", "ready", "last"}),
+            If(need_last,
+                # Synthetic terminator so downstream can unwind.
+                source.valid.eq(1),
+                source.last.eq(1),
+            ).Else(
+                source.valid.eq(sink.valid & ~dropping),
+                source.last.eq(sink.last),
+            ),
+        ]
+
+        self.sync += [
+            If(need_last,
+                If(source.ready,
+                    need_last.eq(0),
+                ),
+            ).Elif(sink.valid,
+                If(sink.last,
+                    in_packet.eq(0),
+                    dropping.eq(0),
+                ).Else(
+                    in_packet.eq(1),
+                    If(~dropping & ~source.ready,
+                        # Downstream just refused a mid-packet beat: stop
+                        # forwarding this packet, but terminate it first.
+                        dropping.eq(1),
+                        need_last.eq(1),
+                        self.dropped.eq(self.dropped + 1),
+                    ),
+                ),
+            ),
+        ]
+
+
+class Bytes32to8(Module):
+    """Serialize a 32-bit eth stream into bytes, first wire byte first.
+
+    LiteX packs the first byte of a word in the low 8 bits, so bytes leave in
+    data[0:8], [8:16], [16:24], [24:32] order. `last_be` marks which bytes of the
+    final beat are real and `last` is asserted on the last of those; without that
+    the padding bytes of a short final word would be emitted as payload and every
+    length check downstream would be wrong.
+    """
+
+    def __init__(self):
+        self.sink = sink = stream.Endpoint(eth_phy_description(32))
+        self.source = source = stream.Endpoint(eth_phy_description(8))
+
+        idx = Signal(2)
+        data = Signal(32)
+        last_be = Signal(4)
+        last = Signal()
+        loaded = Signal()
+        final_idx = Signal(2)
+        byte = Signal(8)
+
+        self.comb += [
+            If(last_be[3], final_idx.eq(3))
+            .Elif(last_be[2], final_idx.eq(2))
+            .Elif(last_be[1], final_idx.eq(1))
+            .Else(final_idx.eq(0)),
+        ]
+
+        self.comb += [
+            Case(idx, {
+                0: byte.eq(data[0:8]),
+                1: byte.eq(data[8:16]),
+                2: byte.eq(data[16:24]),
+                3: byte.eq(data[24:32]),
+            }),
+            sink.ready.eq(~loaded),
+            source.valid.eq(loaded),
+            source.data.eq(byte),
+            source.last.eq(last & (idx == final_idx)),
+            source.last_be.eq(source.last),
+            source.error.eq(0),
+        ]
+
+        self.sync += [
+            If(~loaded,
+                If(sink.valid,
+                    data.eq(sink.data),
+                    last_be.eq(Mux(sink.last, sink.last_be, 0b1111)),
+                    last.eq(sink.last),
+                    idx.eq(0),
+                    loaded.eq(1),
+                ),
+            ).Elif(source.ready,
+                If(source.last | (idx == 3),
+                    loaded.eq(0),
+                ).Else(
+                    idx.eq(idx + 1),
+                ),
+            ),
+        ]

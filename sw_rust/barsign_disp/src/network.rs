@@ -475,6 +475,40 @@ pub extern "C" fn network_handler() {
 }
 
 /// Handle DHCP events.
+/// Publish our MAC/IP to the gateware's hardware UDP filters.
+///
+/// The hardware receive path (Tier 2) matches destination MAC and IP itself.
+/// Our MAC is derived from the flash unique ID and our IP comes from DHCP, so
+/// neither is known at synthesis time -- if these CSRs are not kept current the
+/// filters match nothing and the hardware path silently sees zero packets.
+pub unsafe fn publish_hw_filter_mac(mac: &[u8; 6]) {
+    // A 48-bit CSR splits across a 32-bit bus as
+    //   word0 = bits 31:0 (LOW 32), word1 = bits 47:32 (HIGH 16)
+    // and atomic_write commits on word0, so word1 must be written FIRST.
+    //
+    // Determined from hardware rather than assumed: a gateware-written
+    // CSRStatus(48) holding a known-good parsed MAC read back rotated by two
+    // bytes under the opposite convention. Getting this wrong is silent -- the
+    // readback looks correct because it is wrong in the same direction as the
+    // write, while the filter compares against a scrambled value and matches
+    // nothing, leaving the hardware path idle with no error anywhere.
+    let full: u64 = ((mac[0] as u64) << 40) | ((mac[1] as u64) << 32)
+                  | ((mac[2] as u64) << 24) | ((mac[3] as u64) << 16)
+                  | ((mac[4] as u64) << 8)  | (mac[5] as u64);
+    let low32: u32 = (full & 0xFFFF_FFFF) as u32;
+    let high16: u32 = ((full >> 32) & 0xFFFF) as u32;
+    let p = litex_pac::Peripherals::steal();
+    p.ethmac.mac_address1().write(|w| w.bits(high16));
+    p.ethmac.mac_address0().write(|w| w.bits(low32));
+}
+
+pub unsafe fn publish_hw_filter_ip(ip: Ipv4Address) {
+    let o = ip.0;
+    let v: u32 = ((o[0] as u32) << 24) | ((o[1] as u32) << 16) | ((o[2] as u32) << 8) | (o[3] as u32);
+    let p = litex_pac::Peripherals::steal();
+    p.ethmac.ip_address().write(|w| w.bits(v));
+}
+
 unsafe fn handle_dhcp(iface: &mut Interface<'static, Eth>) {
     let dhcp_handle = *DHCP_HANDLE.assume_init_ref();
     let socket = iface.get_socket::<Dhcpv4Socket>(dhcp_handle);
@@ -486,6 +520,7 @@ unsafe fn handle_dhcp(iface: &mut Interface<'static, Eth>) {
                 iface.update_ip_addrs(|addrs| {
                     addrs[0] = IpCidr::Ipv4(config.address);
                 });
+                publish_hw_filter_ip(config.address.address());
                 if let Some(router) = config.router {
                     iface.routes_mut().add_default_ipv4_route(router).ok();
                 }
@@ -532,6 +567,7 @@ unsafe fn handle_dhcp(iface: &mut Interface<'static, Eth>) {
             iface.update_ip_addrs(|addrs| {
                 addrs[0] = IpCidr::Ipv4(fallback);
             });
+            publish_hw_filter_ip(fallback.address());
         }
     }
 }
@@ -756,6 +792,8 @@ unsafe fn handle_http_request(req: &HttpRequest, resp: &mut HttpResponse, ip: [u
         (Method::Get, "/api/display") => api_display_get(resp),
         (Method::Get, "/api/bitmap/stats") => api_bitmap_stats(resp),
         (Method::Get, "/api/dmatest") => api_dmatest(resp),
+        (Method::Post, "/api/dma/on") => api_dma_set(resp, true),
+        (Method::Post, "/api/dma/off") => api_dma_set(resp, false),
         (Method::Post, "/api/display/on") => api_display_on(resp),
         (Method::Post, "/api/display/off") => api_display_off(resp),
         (Method::Post, "/api/display/pattern") => api_display_pattern(req, resp),
@@ -1014,7 +1052,29 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
         DBG_SLOW_ARP, DBG_SLOW_TCP, DBG_SLOW_UDP, DBG_SLOW_OTHER).ok();
     write!(resp, r#""mcast_dropped":{},"#, DBG_MULTICAST_DROPPED).ok();
     if !HUB75_PTR.is_null() {
-        write!(resp, r#""refresh_count":{},"#, (*HUB75_PTR).refresh_count()).ok();
+        let (dpx, dch, dbad) = (*HUB75_PTR).dma_stats();
+        // Read back what the hardware filters are actually matching against.
+        let pp = litex_pac::Peripherals::steal();
+        let f_mac_hi = pp.ethmac.mac_address0().read().bits();
+        let f_mac_lo = pp.ethmac.mac_address1().read().bits();
+        let f_ip = pp.ethmac.ip_address().read().bits();
+        write!(resp, r#""dbg_mac":{},"dbg_ethertype":{},"#,
+            ((pp.ethmac.dbg_mac1().read().bits() as u64) << 32)
+                | (pp.ethmac.dbg_mac0().read().bits() as u64),
+            pp.ethmac.dbg_ethertype().read().bits()).ok();
+        write!(resp, r#""c_core":{},"c_split2":{},"c_gate_out":{},"c_narrow_out":{},"c_dropped":{},"#,
+            pp.ethmac.c_core().read().bits(), pp.ethmac.c_split2().read().bits(),
+            pp.ethmac.c_gate_out().read().bits(), pp.ethmac.c_narrow_out().read().bits(),
+            pp.ethmac.c_dropped().read().bits()).ok();
+        write!(resp, r#""n_gate":{},"n_narrow":{},"n_mac":{},"n_ip":{},"n_udp":{},"#,
+            pp.ethmac.n_gate().read().bits(), pp.ethmac.n_narrow().read().bits(),
+            pp.ethmac.n_mac().read().bits(), pp.ethmac.n_ip().read().bits(),
+            pp.ethmac.n_udp().read().bits()).ok();
+        write!(resp, r#""hw_filter_mac":{},"hw_filter_ip":{},"#,
+            ((f_mac_lo as u64) << 32) | (f_mac_hi as u64), f_ip).ok();
+        write!(resp, r#""refresh_count":{},"dma_enabled":{},"dma_pixels":{},"dma_chunks":{},"dma_bad_magic":{},"#,
+            (*HUB75_PTR).refresh_count(),
+            if (*HUB75_PTR).dma_enabled() {1} else {0}, dpx, dch, dbad).ok();
     }
     write!(resp, r#""mac_overflow":{},"mac_crc_errors":{},"mac_preamble_errors":{},"#,
         mac_ovf, mac_crc, mac_pre).ok();
@@ -1036,6 +1096,24 @@ unsafe fn api_status(resp: &mut HttpResponse, ip: [u8; 4]) {
 /// system clock gives write bandwidth directly; the refresh delta gives the
 /// price the display pays. This is the measurement that decides whether a
 /// UDP-fed write DMA (Tier 2) has room to exist.
+/// Turn the hardware pixel DMA on or off at runtime.
+///
+/// Lets the same binary be measured both ways: CPU writing pixels (the old
+/// ~600 kpx/s path) versus gateware writing them straight to SDRAM.
+unsafe fn api_dma_set(resp: &mut HttpResponse, on: bool) {
+    use core::fmt::Write;
+    resp.data.clear();
+    resp.data.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n").ok();
+    if !HUB75_PTR.is_null() {
+        (*HUB75_PTR).set_dma_enabled(on);
+        let (px, ch, bad) = (*HUB75_PTR).dma_stats();
+        write!(resp, r#"{{"dma_enabled":{},"pixels":{},"chunks":{},"bad_magic":{}}}"#,
+            if on {1} else {0}, px, ch, bad).ok();
+    } else {
+        write!(resp, r#"{{"error":"no hub75"}}"#).ok();
+    }
+}
+
 unsafe fn api_dmatest(resp: &mut HttpResponse) {
     use core::fmt::Write;
     let p = litex_pac::Peripherals::steal();

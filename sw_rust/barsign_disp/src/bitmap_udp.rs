@@ -295,8 +295,14 @@ impl BitmapReceiver {
             return presented;
         }
 
-        let pixel_offset = chunk_index as usize * PIXELS_PER_CHUNK;
-        hub75.write_img_rgb888(pixel_offset, &data[HEADER_SIZE..]);
+        // Tier 2: when the hardware pixel DMA is enabled it has already written
+        // this chunk straight to SDRAM from the same packet. The CPU still does
+        // everything else -- arrival mask, completion, repair, swap -- it just
+        // stops touching pixels, which is the entire ~600 kpx/s bottleneck.
+        if !hub75.dma_enabled() {
+            let pixel_offset = chunk_index as usize * PIXELS_PER_CHUNK;
+            hub75.write_img_rgb888(pixel_offset, &data[HEADER_SIZE..]);
+        }
 
         self.mask_set(chunk_index);
         self.received += 1;

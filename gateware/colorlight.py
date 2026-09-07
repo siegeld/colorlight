@@ -54,7 +54,7 @@ from litespi import LiteSPI
 from smoleth import SmolEth  # Provides MAC access for CPU (telnet, ARP handled in firmware)
 
 import hub75
-from dma_writer import SdramWriteTester
+from dma_writer import SdramWriteTester, Hub75UdpDma
 
 # from artnet2ram import Artnet2RAM  # TODO: Re-add Art-Net hardware support
 
@@ -287,15 +287,59 @@ class BaseSoC(SoCCore):
         eth_ip_address = (ip_parts[0] << 24) | (ip_parts[1] << 16) | (ip_parts[2] << 8) | ip_parts[3]
         eth_mac_address = 0x10e2d5000001
 
-        # Standard LiteEth MAC - provides raw ethernet access to CPU
-        # Rust firmware handles ARP/ICMP/TCP via smoltcp
-        self.add_ethernet(
+        # MAC for the CPU, plus a hardware UDP receive path (Tier 2).
+        #
+        # This was self.add_ethernet(). The tap has to sit AFTER LiteEthMACCore,
+        # which strips the preamble and checks CRC, and that core is buried
+        # inside LiteEthMAC where add_ethernet() gives no access to it. SmolEth
+        # builds the core itself, which is exactly why it exists in this repo.
+        # The CPU-visible side is unchanged: same wishbone slots, same CSR names,
+        # same IRQ.
+        ethmac = SmolEth(
             phy=phy,
+            udp_port=7000,
+            mac_address=eth_mac_address,
+            ip_address=eth_ip_address,
+            dw=32,
             nrxslots=8,
             ntxslots=2,
-            local_ip=ip_address,
-            remote_ip="10.11.6.65",
+            with_hw_udp=True,
         )
+        self.add_module(name="ethmac", module=ethmac)
+
+        ethmac_rx_region_size = ethmac.rx_slots.constant * ethmac.slot_size.constant
+        ethmac_tx_region_size = ethmac.tx_slots.constant * ethmac.slot_size.constant
+        self.bus.add_region("ethmac", SoCRegion(
+            origin = self.mem_map.get("ethmac", None),
+            size   = ethmac_rx_region_size + ethmac_tx_region_size,
+            linker = True,
+            cached = False,
+        ))
+        self.bus.add_slave(name="ethmac_rx", slave=ethmac.bus_rx, region=SoCRegion(
+            origin = self.bus.regions["ethmac"].origin,
+            size   = ethmac_rx_region_size,
+            mode   = "r", linker = False, cached = False,
+        ))
+        self.bus.add_slave(name="ethmac_tx", slave=ethmac.bus_tx, region=SoCRegion(
+            origin = self.bus.regions["ethmac"].origin + ethmac_rx_region_size,
+            size   = ethmac_tx_region_size,
+            mode   = "rw", linker = False, cached = False,
+        ))
+        if self.irq.enabled:
+            self.irq.add("ethmac", use_loc_if_exists=True)
+        self.add_constant("ETH_PHY_NO_RESET")
+        self.add_constant("LOCALIP1", ip_parts[0])
+        self.add_constant("LOCALIP2", ip_parts[1])
+        self.add_constant("LOCALIP3", ip_parts[2])
+        self.add_constant("LOCALIP4", ip_parts[3])
+        for i, part in enumerate("10.11.6.65".split(".")):
+            self.add_constant(f"REMOTEIP{i+1}", int(part))
+
+        # Pixels off the CPU: hardware writes the streamed payload straight to
+        # SDRAM. Defaults to DISABLED so the ethernet restructure above can be
+        # validated on its own before hardware writes are switched on.
+        self.submodules.pixdma = Hub75UdpDma(self.sdram, ethmac.udp_source)
+        self.add_csr("pixdma")
 
         # TODO: broadcast TFTP not working yet — needs ETH_UDP_BROADCAST + BIOS patch
         # self.add_constant("ETH_UDP_BROADCAST")
