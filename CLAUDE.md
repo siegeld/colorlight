@@ -38,8 +38,19 @@ how many panels are actually used and where they appear in the virtual display.
 
 - **Device IP**: 10.11.6.72 (via DHCP)
 - **Bitstream**: 128x64, chain_length=2, 6 outputs (default build)
-- **Physical panels**: Four 128x64 panels in a 2x2 grid (J1: top row, J2: bottom row)
-- **Virtual display**: 256x128 (configured via TFTP YAML)
+- **Physical panels**: Six 128x64 panels, **one per connector J1-J6, no chaining**,
+  arranged 2 wide x 3 tall:
+
+  | | col 0 | col 1 |
+  |---|---|---|
+  | **row 0** (top) | J1 | J2 |
+  | **row 1** | J3 | J4 |
+  | **row 2** (bottom) | J5 | J6 |
+
+- **Virtual display**: 256x192 (configured via TFTP YAML). 49,152 px, so it fits
+  the 65,536-word framebuffer half with 16,384 words spare.
+  The bitstream still carries chain_length=2, so chain slot 1 simply goes
+  unassigned -- 6 of the 12 available slots are used.
 - **Prebuilt bitstreams**: `bitstreams/` directory (128x64.bit, 96x48.bit, etc.)
 
 ## Build Commands
@@ -62,11 +73,11 @@ how many panels are actually used and where they appear in the virtual display.
 ## Test Patterns
 
 ```bash
-# Single pattern — the virtual display is 256x128 (2x2 grid of 128x64 panels)
-python3 tools/send_test_pattern.py gradient --host 10.11.6.72 --width 256 --height 128
+# Single pattern — the virtual display is 256x192 (2x3 grid of 128x64 panels)
+python3 tools/send_test_pattern.py gradient --host 10.11.6.72 --width 256 --height 192
 
 # Smoke test (cycles all patterns forever)
-python3 tools/send_test_pattern.py --smoke --host 10.11.6.72 --width 256 --height 128
+python3 tools/send_test_pattern.py --smoke --host 10.11.6.72 --width 256 --height 192
 
 # Throughput / loss measurement — see the baseline table in the script header
 python3 tools/bench_stream.py --host 10.11.6.72 sweep

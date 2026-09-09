@@ -1,5 +1,21 @@
-grid: 2x2
+# bench panel — 6 units, one per connector (no chaining)
+# 2 wide x 3 tall => 256 x 192 px virtual display (512 x 384 mm)
+#
+#   +-------+-------+
+#   |  J1   |  J2   |   row 0 (top)
+#   +-------+-------+
+#   |  J3   |  J4   |   row 1
+#   +-------+-------+
+#   |  J5   |  J6   |   row 2 (bottom)
+#   +-------+-------+
+#
+# One position per connector = chain slot 0 only; slot 1 is left unassigned.
+grid: 2x3
 panel_width: 128
 panel_height: 64
-J1: 0,0 1,0
-J2: 0,1 1,1
+J1: 0,0
+J2: 1,0
+J3: 0,1
+J4: 1,1
+J5: 0,2
+J6: 1,2
