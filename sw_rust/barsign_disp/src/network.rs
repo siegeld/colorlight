@@ -105,11 +105,14 @@ static mut IAC_STATE: u8 = 0;
 // Time tracking
 static mut TIME_MS: i64 = 0;
 static mut LAST_BITMAP_PACKET_MS: i64 = 0;
+/// Last ISR that serviced the TCP sockets -- see SOCKET_POLL_MS in network_handler.
+static mut LAST_SOCKET_POLL_MS: i64 = 0;
 
 // Debug counters for diagnosing packet routing
 static mut DBG_FAST_PATH: u32 = 0;      // Packets via is_bitmap_udp() fast path
 static mut DBG_SLOW_PATH: u32 = 0;      // Packets via smoltcp slow path
 static mut DBG_ISR_MAX_BATCH: u32 = 0;  // Max packets processed in single ISR
+static mut STATS_PUBLISH_TICK: u32 = 0; // rate-limits the per-packet stats publish
 
 // Capture first slow-path packet header for debugging
 static mut DBG_SLOW_PKT: [u8; 64] = [0; 64];  // First 64 bytes of slow-path packet
@@ -133,11 +136,16 @@ static mut DBG_SLOW_OTHER: u32 = 0;
 /// Seconds counter - incremented each time timer wraps (every 1 second)
 static mut TIMER_SECONDS: i64 = 0;
 
-/// Timer reload value (1 second at 40MHz)
-const TIMER_RELOAD: u32 = 40_000_000;
+/// System clock. MUST match gateware sys_clk_freq in colorlight.py -- every
+/// millisecond in this firmware is derived from it, so a mismatch silently
+/// rescales all timing (stale-frame deadlines, HTTP timeouts, frame intervals).
+pub const SYS_CLK_HZ: u32 = 40_000_000;
+
+/// Timer reload value (1 second)
+const TIMER_RELOAD: u32 = SYS_CLK_HZ;
 
 /// Cycles per millisecond
-const CYCLES_PER_MS: u32 = 40_000;
+const CYCLES_PER_MS: u32 = SYS_CLK_HZ / 1000;
 
 /// Update timer seconds counter and compute current time in ms.
 /// Called from ISR to ensure second boundaries aren't missed.
@@ -460,10 +468,24 @@ pub extern "C" fn network_handler() {
             DBG_ISR_MAX_BATCH = batch_count;
         }
 
-        // Handle socket events
-        // TCP handlers always run (cheap when idle, needed for responsive HTTP)
-        handle_telnet(iface);
-        let http_needs_poll = handle_http(iface);
+        // Handle socket events.
+        //
+        // These used to run unconditionally. "Cheap when idle" is true at 10 Hz
+        // and false at 2000 Hz: measured 1.13 bitmap packets per ISR entry, so
+        // the ISR is entered essentially once per packet and every one of them
+        // was walking smoltcp's TCP socket state. Run them when there is actual
+        // slow-path traffic, or on a deadline so an idle connection still gets
+        // serviced promptly. SOCKET_POLL_MS bounds the added HTTP/telnet latency.
+        const SOCKET_POLL_MS: i64 = 5;
+        let sockets_due = had_tcp || had_arp
+            || TIME_MS < LAST_SOCKET_POLL_MS                       // clock stepped back
+            || TIME_MS - LAST_SOCKET_POLL_MS >= SOCKET_POLL_MS;
+        let mut http_needs_poll = false;
+        if sockets_due {
+            LAST_SOCKET_POLL_MS = TIME_MS;
+            handle_telnet(iface);
+            http_needs_poll = handle_http(iface);
+        }
 
         // UDP handlers + TFTP: run on any slow-path packet, or while TFTP
         // config is loading (iface.poll may have delivered packets to sockets
@@ -1581,11 +1603,20 @@ pub fn process_raw_bitmap(frame: &[u8]) -> bool {
             }
         }
 
-        // Publish unconditionally. This used to sit inside `if complete`, which
-        // froze the published counters whenever frames stopped completing --
-        // exactly the regime bad_magic / bad_header / frames_dropped exist to
-        // diagnose.
-        if !BITMAP_STATS_PTR.is_null() {
+        // Publish the stats block, but not on every single packet.
+        //
+        // It must not sit inside `if presented` -- that froze the counters
+        // exactly when frames stopped completing, which is the regime
+        // bad_magic / bad_header / frames_dropped exist to diagnose. But it is
+        // a ~22-field struct written to UNCACHED SDRAM, so doing it per packet
+        // costs a few hundred cycles ~2000 times a second to publish numbers
+        // nothing reads at that rate. Publish on every presented frame, and
+        // otherwise every PUBLISH_EVERY packets so the counters still move
+        // while frames are being dropped.
+        const PUBLISH_EVERY: u32 = 64;
+        STATS_PUBLISH_TICK = STATS_PUBLISH_TICK.wrapping_add(1);
+        if !BITMAP_STATS_PTR.is_null()
+            && (presented || STATS_PUBLISH_TICK % PUBLISH_EVERY == 0) {
             *BITMAP_STATS_PTR = bitmap_rx.stats;
         }
 

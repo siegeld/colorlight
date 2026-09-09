@@ -328,8 +328,9 @@ fn main() -> ! {
     unsafe {
         let t = &*pac::Timer0::ptr();
         t.en().write(|w| w.bits(0));
-        t.reload().write(|w| w.bits(40_000_000 - 1));  // 40MHz = 40M cycles per second
-        t.load().write(|w| w.bits(40_000_000 - 1));
+        // Derived from the one clock constant, not repeated as a literal.
+        t.reload().write(|w| w.bits(network::SYS_CLK_HZ - 1));
+        t.load().write(|w| w.bits(network::SYS_CLK_HZ - 1));
         t.en().write(|w| w.bits(1));
         t.ev_pending().write(|w| w.bits(1));        // clear any pending event
         t.ev_enable().write(|w| w.bits(1));         // route the tick to the CPU
