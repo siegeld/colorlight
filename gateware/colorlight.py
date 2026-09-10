@@ -46,7 +46,7 @@ from liteeth.common import *
 
 from litex.build.generic_platform import Subsignal, Pins, Misc, IOStandard
 
-from litespi.modules import W25Q32JV
+from litespi.modules import GD25Q32
 from litespi.opcodes import SpiNorFlashOpCodes as Codes
 from litespi.phy.generic import LiteSPIPHY
 from litespi import LiteSPI
@@ -162,9 +162,19 @@ class BaseSoC(SoCCore):
             # uart_name="crossover+bridge",
             uart_baudrate=115200,
         )
-        # SPI Flash: rev 8.2 boards carry a Winbond W25Q32JV (4MB).
-        # (Older v6.1 boards used a GD25Q16 (2MB) — swap the module back for those.)
-        flash = W25Q32JV(Codes.READ_1_1_1)
+        # SPI Flash: GigaDevice GD25Q32 (4MB).
+        #
+        # This board was declared as a Winbond W25Q32JV, but the silicon reports
+        # JEDEC `c8 40 16`: c8 is GigaDevice, and 0x4016 decodes to 2^0x16 = 4MB.
+        # Both parts are 4MB / 256-byte page / 8 dummy bits and both support
+        # READ_1_1_1, which is why reads worked anyway -- flash_id's MAC
+        # derivation has always succeeded. Declaring the part that is actually
+        # fitted matters before anything WRITES to it (see TODO item 2): erase
+        # granularity and status/protection handling are where vendors differ,
+        # and `build.sh flash` has never been run.
+        #
+        # (Older v6.1 boards used a GD25Q16 (2MB) — swap the module for those.)
+        flash = GD25Q32(Codes.READ_1_1_1)
         self.submodules.spiflash_phy = LiteSPIPHY(
             pads=platform.request("spiflash"), flash=flash, device=platform.device
         )
